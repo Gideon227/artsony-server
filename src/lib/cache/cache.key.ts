@@ -1,0 +1,32 @@
+export const CacheKeys = {
+  user: (id: string) => `user:${id}`,
+  userProfile: (id: string) => `user:profile:${id}`,
+  artwork: (id: string) => `artwork:${id}`,
+  artworksByUser: (userId: string) => `artworks:user:${userId}`,
+  feed: (userId: string, cursor?: string) => `feed:${userId}:${cursor ?? 'init'}`,
+  feedTrending: (page: number) => `feed:trending:${page}`,
+  feedNewest: (cursor?: string) => `feed:newest:${cursor ?? 'init'}`,
+  followers: (userId: string) => `followers:${userId}`,
+  following: (userId: string) => `following:${userId}`,
+  followersCount: (userId: string) => `followers:count:${userId}`,
+  followingCount: (userId: string) => `following:count:${userId}`,
+  session: (token: string) => `session:${token}`,
+  refreshToken: (userId: string) => `refresh:${userId}`,
+  rateLimitKey: (ip: string, route: string) => `rl:${route}:${ip}`,
+  notifications: (userId: string) => `notifications:${userId}`,
+  cartItems: (userId: string) => `cart:${userId}`,
+} as const;
+
+export const CacheTTL = {
+  USER: 300,
+  PROFILE: 300,
+  ARTWORK: 600,
+  ARTWORKS_BY_USER: 120,
+  FEED: 60,
+  TRENDING: 300,
+  FOLLOWERS: 120,
+  SESSION: 900,
+  REFRESH_TOKEN: 60 * 60 * 24 * 7,
+  NOTIFICATIONS: 30,
+  CART: 1800,
+} as const;
