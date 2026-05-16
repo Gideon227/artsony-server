@@ -1,38 +1,60 @@
-import type { Request, Response, NextFunction } from 'express';
-import { ZodError } from 'zod';
+import type { Request, Response, NextFunction } from 'express'
+import { AppError } from '../common/errors'
 
-import { AppError } from '../common/errors/AppError.js';
-import { ApiResponse } from '../common/response/ApiResponse.js';
-import { config } from '../config/index.js';
-import { logger } from '../lib/logger/index.js';
+// ─── Global error handler ─────────────────────────────────────────────────────
 
-export const errorMiddleware = (
+export function errorHandler(
   err: unknown,
   req: Request,
   res: Response,
-  _next: NextFunction,
-): Response => {
-  if (err instanceof ZodError) {
-    return ApiResponse.error(
-      res,
-      422,
-      'VALIDATION_ERROR',
-      'Request validation failed',
-      err.flatten().fieldErrors,
-    );
-  }
-
+  _next: NextFunction
+): void {
   if (err instanceof AppError) {
-    if (!err.isOperational) {
-      logger.error({ err, req: { method: req.method, url: req.url } }, 'Unexpected error');
-    }
-
-    return ApiResponse.error(res, err.statusCode, err.code, err.message, err.details);
+    res.status(err.statusCode).json({
+      success: false,
+      code: err.code,
+      message: err.message,
+      ...(err.statusCode === 422 && 'fields' in err
+        ? { fields: (err as { fields?: Record<string, string> }).fields }
+        : {}),
+    })
+    return
   }
 
-  // Unexpected/unhandled errors
-  logger.error({ err, req: { method: req.method, url: req.url } }, 'Unhandled error');
+  // Unknown error — log and return generic 500
+  console.error('[UnhandledError]', err)
 
-  const message = config.NODE_ENV === 'production' ? 'Internal server error' : String(err);
-  return ApiResponse.error(res, 500, 'INTERNAL_ERROR', message);
-};
+  res.status(500).json({
+    success: false,
+    code: 'INTERNAL_ERROR',
+    message: 'An unexpected error occurred',
+  })
+}
+
+// ─── Not found handler ────────────────────────────────────────────────────────
+
+export function notFoundHandler(req: Request, res: Response): void {
+  res.status(404).json({
+    success: false,
+    code: 'NOT_FOUND',
+    message: `Route ${req.method} ${req.path} not found`,
+  })
+}
+
+// ─── Request context extractor ────────────────────────────────────────────────
+
+export function extractRequestContext(req: Request): {
+  ipAddress: string | null
+  userAgent: string | null
+} {
+  // Trust X-Forwarded-For only if behind a trusted proxy
+  const ip =
+    (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
+    req.socket.remoteAddress ??
+    null
+
+  return {
+    ipAddress: ip,
+    userAgent: req.headers['user-agent'] ?? null,
+  }
+}

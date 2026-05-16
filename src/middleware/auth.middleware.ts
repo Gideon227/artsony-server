@@ -1,62 +1,109 @@
-import type { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
+import type { Request, Response, NextFunction } from 'express'
+import { verifyAccessToken } from '../modules/auth/services/token.service'
+import { userRepository } from '../modules/auth/repositories/user.repository'
+import {
+  UnauthorizedError,
+  ForbiddenError,
+} from '../common/errors'
+import type { UserRole, AccessTokenPayload } from '../common/types'
 
-import { AppError } from '../common/errors/AppError.js';
-import { config } from '../config/index.js';
-import type { JwtPayload, UserRole } from '@/types/index.js';
-
-declare module 'express' {
-  interface Request {
-    user?: JwtPayload;
+// Augment Express Request
+declare global {
+  namespace Express {
+    interface Request {
+      auth?: AccessTokenPayload
+    }
   }
 }
 
-export const authenticate = (req: Request, _res: Response, next: NextFunction): void => {
-  const authHeader = req.headers.authorization;
+// ─── Extract Bearer token from Authorization header ───────────────────────────
 
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw AppError.unauthorized('Missing or malformed authorization header');
-  }
+function extractBearerToken(req: Request): string | null {
+  const header = req.headers.authorization
+  if (!header?.startsWith('Bearer ')) return null
+  return header.slice(7)
+}
 
-  const token = authHeader.slice(7);
+// ─── requireAuth — verifies JWT and attaches payload to req.auth ──────────────
 
+export async function requireAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
-    const payload = jwt.verify(token, config.JWT_ACCESS_SECRET) as JwtPayload;
-    req.user = payload;
-    next();
+    const token = extractBearerToken(req)
+    if (!token) throw new UnauthorizedError()
+
+    const payload = await verifyAccessToken(token)
+
+    // Verify token version against DB — invalidated on password change
+    const user = await userRepository.findById(payload.sub)
+    if (!user || user.status !== 'ACTIVE') throw new UnauthorizedError()
+    if (user.token_version !== payload.ver) throw new UnauthorizedError('Session invalidated')
+
+    req.auth = payload
+    next()
   } catch (err) {
-    if (err instanceof jwt.TokenExpiredError) {
-      throw new AppError('Access token expired', 401, 'TOKEN_EXPIRED' as never);
-    }
-    throw AppError.unauthorized('Invalid access token');
+    next(err)
   }
-};
+}
 
-export const authorize = (...roles: UserRole[]) => {
-  return (req: Request, _res: Response, next: NextFunction): void => {
-    if (!req.user) throw AppError.unauthorized();
+// ─── authorize — role-based access control middleware factory ─────────────────
 
-    if (roles.length > 0 && !roles.includes(req.user.role)) {
-      throw AppError.forbidden('Insufficient permissions');
+export function authorize(roles: UserRole[]) {
+  return function (req: Request, _res: Response, next: NextFunction): void {
+    if (!req.auth) {
+      return next(new UnauthorizedError())
+    }
+    if (!roles.includes(req.auth.role)) {
+      return next(new ForbiddenError('Insufficient permissions'))
+    }
+    next()
+  }
+}
+
+// ─── requireOnboarded — blocks access if user hasn't completed onboarding ─────
+
+export async function requireOnboarded(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.auth) throw new UnauthorizedError()
+
+    const user = await userRepository.findById(req.auth.sub)
+    if (!user) throw new UnauthorizedError()
+
+    if (!user.onboarded) {
+      res.status(403).json({
+        code: 'ONBOARDING_REQUIRED',
+        redirectTo: '/auth/interests',
+      })
+      return
     }
 
-    next();
-  };
-};
-
-export const optionalAuth = (req: Request, _res: Response, next: NextFunction): void => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader?.startsWith('Bearer ')) {
-    return next();
+    next()
+  } catch (err) {
+    next(err)
   }
+}
+
+// ─── optionalAuth — attaches auth payload if token present, doesn't throw ─────
+
+export async function optionalAuth(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): Promise<void> {
+  const token = extractBearerToken(req)
+  if (!token) return next()
 
   try {
-    const token = authHeader.slice(7);
-    req.user = jwt.verify(token, config.JWT_ACCESS_SECRET) as JwtPayload;
+    req.auth = await verifyAccessToken(token)
   } catch {
-    // Non-fatal — continue without auth
+    // Silently ignore invalid token for optional auth routes
   }
-
-  next();
-};
+  next()
+}
