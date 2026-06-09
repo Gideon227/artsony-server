@@ -168,6 +168,103 @@ export const emailService = {
     })
   },
 
+  async sendOrderConfirmation(input: {
+    to: string
+    orderId: string
+    items: Array<{
+      artwork_title:         string
+      artwork_thumbnail_url: string | null
+      artwork_format:        string
+      unit_price:            number
+      currency:              string
+      quantity:              number
+    }>
+    total: number
+    currency: string
+  }): Promise<void> {
+    const shortId = input.orderId.slice(0, 8).toUpperCase()
+
+    const itemRows = input.items.map(item => `
+      <tr>
+        <td style="padding:12px 0;border-bottom:1px solid #E6E8EB;">
+          <span style="font-size:14px;font-weight:600;color:#25282D;">${item.artwork_title}</span>
+          <span style="display:block;font-size:12px;color:#788191;margin-top:2px;">
+            ${item.artwork_format} &nbsp;·&nbsp; Qty ${item.quantity}
+          </span>
+        </td>
+        <td style="padding:12px 0;border-bottom:1px solid #E6E8EB;text-align:right;font-size:14px;color:#25282D;font-weight:600;">
+          ${item.currency} ${(item.unit_price * item.quantity).toFixed(2)}
+        </td>
+      </tr>
+    `).join('')
+
+    const html = baseTemplate(`
+      <h2 style="margin:0 0 4px;font-size:22px;font-weight:700;color:#25282D;">Order confirmed</h2>
+      <p style="margin:0 0 24px;font-size:14px;color:#788191;">Order #${shortId}</p>
+      <p style="margin:0 0 16px;font-size:15px;color:#525965;line-height:1.6;">
+        Your payment is being verified on-chain. You'll receive another email once it's confirmed
+        and your items are ready.
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;">
+        <thead>
+          <tr>
+            <th style="text-align:left;font-size:12px;color:#788191;font-weight:500;padding-bottom:8px;border-bottom:2px solid #E6E8EB;">ITEM</th>
+            <th style="text-align:right;font-size:12px;color:#788191;font-weight:500;padding-bottom:8px;border-bottom:2px solid #E6E8EB;">AMOUNT</th>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+        <tfoot>
+          <tr>
+            <td style="padding-top:12px;font-size:15px;font-weight:700;color:#25282D;">Total</td>
+            <td style="padding-top:12px;font-size:15px;font-weight:700;color:#25282D;text-align:right;">
+              ${input.currency} ${input.total.toFixed(2)}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+      <a href="${config.app.frontendUrl}/orders/${input.orderId}"
+         style="display:inline-block;background:#F25B38;color:#fff;font-weight:600;font-size:15px;
+                padding:14px 32px;border-radius:999px;text-decoration:none;margin-top:8px;">
+        View Order
+      </a>
+    `)
+
+    await emailQueue.add({
+      to:      input.to,
+      subject: `Order confirmed — #${shortId}`,
+      html,
+      text:    `Your Artsony order #${shortId} has been received. Total: ${input.currency} ${input.total.toFixed(2)}. Track it at ${config.app.frontendUrl}/orders/${input.orderId}`,
+    })
+  },
+
+  async sendOrderShippedEmail(input: {
+    to: string
+    orderId: string
+    artworkTitle: string
+  }): Promise<void> {
+    const shortId = input.orderId.slice(0, 8).toUpperCase()
+
+    const html = baseTemplate(`
+      <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#25282D;">Your order is on its way</h2>
+      <p style="margin:0 0 24px;font-size:15px;color:#525965;line-height:1.6;">
+        Good news — <strong>${input.artworkTitle}</strong> has been shipped by the seller.
+        Order reference: <strong>#${shortId}</strong>
+      </p>
+      <a href="${config.app.frontendUrl}/orders/${input.orderId}"
+         style="display:inline-block;background:#F25B38;color:#fff;font-weight:600;font-size:15px;
+                padding:14px 32px;border-radius:999px;text-decoration:none;">
+        Track Order
+      </a>
+    `)
+
+    await emailQueue.add({
+      to:      input.to,
+      subject: `Your Artsony order #${shortId} has shipped`,
+      html,
+      text: `Your order #${shortId} (${input.artworkTitle}) has been shipped. View it at ${config.app.frontendUrl}/orders/${input.orderId}`,
+    })
+  },
+
   async sendAccountDeletionConfirmation(input: {
     to: string
     displayName: string

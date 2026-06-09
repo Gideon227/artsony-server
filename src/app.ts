@@ -10,6 +10,13 @@ import { userRouter } from './modules/user/user.router'
 import { errorHandler, notFoundHandler } from './middleware/error.middleware'
 import { apiRateLimit } from './middleware/rate-limit.middleware'
 import { config } from './config'
+import { artworkRouter } from './modules/artwork/routes/artwork.routes'
+import { cartRouter } from './modules/cart/routes/cart.routes'
+import { orderRouter } from './modules/order/routes/order.routes'
+import { deliveryRouter } from './modules/delivery/routes/delivery.routes'
+import { requireAuth, requireOnboarded } from './middleware/auth.middleware'
+import { uploadRouter } from './modules/upload/routes/upload.routes'
+import path from 'path'
 
 export function createApp() {
   const app = express()
@@ -41,7 +48,7 @@ export function createApp() {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
     maxAge: 86_400,
   }))
 
@@ -70,7 +77,13 @@ export function createApp() {
   // ── Routes ────────────────────────────────────────────────────────────────
   app.use('/api/auth', authRouter)
   app.use('/api/users', userRouter)
+  app.use('/api/artworks', artworkRouter)
+  app.use('/api/cart', cartRouter)
+  app.use('/api/orders', orderRouter)
+  app.use('/api/delivery', deliveryRouter)
   app.use('/api', apiRateLimit)
+  app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')))
+  app.use('/api/upload', uploadRouter)
   // In any router that needs it onboarding protection add:
   // router.use(requireAuth, requireOnboarded)
 

@@ -1,6 +1,7 @@
 import { createApp } from './app'
 import { config } from './config'
 import { getRedis } from './modules/redis/redis.client'
+import { startExpireScheduler } from './modules/payment/jobs/payment.job'
 
 const app = createApp()
 
@@ -11,6 +12,11 @@ async function start() {
   } catch (err) {
     console.error('[Redis] Connection failed:', err)
     process.exit(1)
+  }
+
+  // Register recurring background jobs
+  if (config.env !== 'test') {
+    await startExpireScheduler()
   }
 
   const server = app.listen(config.port, () => {

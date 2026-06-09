@@ -10,8 +10,12 @@ function optional_env(key: string, fallback: string): string {
   return process.env[key] ?? fallback
 }
 
+// ── Environment Constants (Fixes noPropertyAccessFromIndexSignature) ─────────
+const currentEnv = (process.env['NODE_ENV'] ?? 'development') as 'development' | 'production' | 'test'
+const isProduction = currentEnv === 'production'
+
 export const config = {
-  env: optional_env('NODE_ENV', 'development') as 'development' | 'production' | 'test',
+  env: currentEnv,
   port: parseInt(optional_env('PORT', '4000'), 10),
 
   // ── Supabase (replaces raw DB connection config) ─────────────────────────
@@ -41,7 +45,7 @@ export const config = {
 
   cookie: {
     domain: optional_env('COOKIE_DOMAIN', 'localhost'),
-    secure: process.env.NODE_ENV === 'production',
+    secure: isProduction,
     sameSite: 'strict' as const,
   },
 
@@ -67,7 +71,7 @@ export const config = {
   email: {
     host: require_env('SMTP_HOST'),
     port: parseInt(optional_env('SMTP_PORT', '587'), 10),
-    secure: process.env.NODE_ENV === 'production',
+    secure: isProduction,
     user: require_env('SMTP_USER'),
     password: require_env('SMTP_PASSWORD'),
     from: optional_env('SMTP_FROM', 'noreply@artsony.com'),
