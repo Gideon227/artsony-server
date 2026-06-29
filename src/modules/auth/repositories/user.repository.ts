@@ -87,6 +87,18 @@ export const userRepository = {
     return toUser(result.data)
   },
 
+  async searchByUsername(query: string, limit = 10): Promise<User[]> {
+    const result = await (supabase() as any)
+      .from('users')
+      .select('*')
+      .ilike('username', `%${query}%`)
+      .eq('status', 'ACTIVE')
+      .limit(limit)
+
+    if (result.error) throw new Error(`[UserRepo:searchByUsername] ${result.error.message}`)
+    return (result.data ?? []).map(toUser)
+  },
+
   async create(input: CreateUserInput): Promise<User> {
     const result = await (supabase() as any)
       .from('users')

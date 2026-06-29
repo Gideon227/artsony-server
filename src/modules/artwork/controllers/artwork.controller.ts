@@ -27,11 +27,12 @@ function assertValid(req: Request): void {
 }
 
 // ── Reusable sub-chains ───────────────────────────────────────────────────────
+const isProduction = process.env['NODE_ENV'] === 'production';
 
 const assetValidation = [
   body('assets').isArray({ min: 0 }).withMessage('assets must be an array'),
   body('assets.*.original_url')
-    .isURL({ protocols: ['https'], require_tld: true, require_protocol: true })
+    .isURL({ require_tld: isProduction, require_protocol: true, protocols: isProduction ? ['https'] : ['http', 'https'] })
     .withMessage('Each asset must have a valid HTTPS original_url'),
   body('assets.*.media_type')
     .isIn(['IMAGE', 'VIDEO', 'THREE_D', 'EXTERNAL_LINK'])

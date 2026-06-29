@@ -89,6 +89,36 @@ export async function handleGetMe(
   }
 }
 
+// ─── GET /api/users/search?q=username&limit=10 ────────────────────────────────
+export async function handleSearchUsers(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ success: false, code: 'UNAUTHORIZED' })
+      return
+    }
+
+    const q = String(req.query['q'] ?? '').trim()
+    const limit = Math.min(Number(req.query['limit'] ?? 10), 20)
+
+    if (q.length < 2) {
+      res.json({ success: true, data: [] })
+      return
+    }
+
+    const { userRepository } = await import(
+      '@/modules/auth/repositories/user.repository.js'
+    )
+    const results = await userRepository.searchByUsername(q, limit)
+    res.json({ success: true, data: results.map(sanitiseUser) })
+  } catch (err) {
+    next(err)
+  }
+}
+
 // ─── Sanitise user before sending to client ───────────────────────────────────
 
 function sanitiseUser(user: User) {

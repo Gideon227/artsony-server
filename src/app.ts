@@ -5,18 +5,24 @@ import cookieParser from 'cookie-parser'
 import morgan from 'morgan'
 import hpp from 'hpp'
 import mongoSanitize from 'express-mongo-sanitize'
+import path from 'path'
+
+// Modules
 import { authRouter } from './modules/auth/auth.router'
 import { userRouter } from './modules/user/user.router'
-import { errorHandler, notFoundHandler } from './middleware/error.middleware'
-import { apiRateLimit } from './middleware/rate-limit.middleware'
-import { config } from './config'
 import { artworkRouter } from './modules/artwork/routes/artwork.routes'
 import { cartRouter } from './modules/cart/routes/cart.routes'
 import { orderRouter } from './modules/order/routes/order.routes'
 import { deliveryRouter } from './modules/delivery/routes/delivery.routes'
-import { requireAuth, requireOnboarded } from './middleware/auth.middleware'
 import { uploadRouter } from './modules/upload/routes/upload.routes'
-import path from 'path'
+import { messagingRouter } from './modules/messaging/routes/messaging.router'
+import { notificationRouter } from './modules/messaging/routes/notification.router'
+
+// Middleware & Config
+import { errorHandler, notFoundHandler } from './middleware/error.middleware'
+import { apiRateLimit } from './middleware/rate-limit.middleware'
+import { requireAuth, requireOnboarded } from './middleware/auth.middleware'
+import { config } from './config'
 
 export function createApp() {
   const app = express()
@@ -29,7 +35,7 @@ export function createApp() {
         scriptSrc: ["'self'"],
         styleSrc: ["'self'"],
         imgSrc: ["'self'", 'data:', 'https:'],
-        connectSrc: ["'self'"],
+        connectSrc: ["'self'", 'wss:'],   // wss: required for WebSocket upgrade
         frameSrc: ["'none'"],
         objectSrc: ["'none'"],
       },
@@ -37,7 +43,7 @@ export function createApp() {
     hsts: { maxAge: 31_536_000, includeSubDomains: true, preload: true },
     noSniff: true,
     xssFilter: true,
-    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    referrerPolicy:  { policy: 'strict-origin-when-cross-origin' },
   }))
 
   // ── CORS ───────────────────────────────────────────────────────────────────
@@ -66,28 +72,34 @@ export function createApp() {
     app.use(morgan(config.env === 'production' ? 'combined' : 'dev'))
   }
 
-  // ── Trust proxy (Nginx / load balancer) ───────────────────────────────────
+  // ── Trust proxy (Nginx / load balancer) ────────────────────────────────────
   app.set('trust proxy', 1)
 
-  // ── Health ────────────────────────────────────────────────────────────────
+  // ── Health ─────────────────────────────────────────────────────────────────
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', ts: new Date().toISOString() })
   })
 
-  // ── Routes ────────────────────────────────────────────────────────────────
+  // ── Static Files ───────────────────────────────────────────────────────────
+  app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')))
+
+  // ── Routes ─────────────────────────────────────────────────────────────────
+  app.use('/api', apiRateLimit) // Applies rate limiting to all /api routes defined below
+  
   app.use('/api/auth', authRouter)
   app.use('/api/users', userRouter)
   app.use('/api/artworks', artworkRouter)
   app.use('/api/cart', cartRouter)
   app.use('/api/orders', orderRouter)
   app.use('/api/delivery', deliveryRouter)
-  app.use('/api', apiRateLimit)
-  app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')))
   app.use('/api/upload', uploadRouter)
-  // In any router that needs it onboarding protection add:
+  app.use('/api/conversations', messagingRouter)
+  app.use('/api/notifications', notificationRouter)
+
+  // Note: In any specific router that needs onboarding protection, import and use:
   // router.use(requireAuth, requireOnboarded)
 
-  // ── Fallthrough ───────────────────────────────────────────────────────────
+  // ── Fallthrough ────────────────────────────────────────────────────────────
   app.use(notFoundHandler)
   app.use(errorHandler)
 

@@ -10,63 +10,63 @@ import { Moodboard } from "./moodboard.types"
 // SECTION 1: AUTH & USER DOMAIN TYPES
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type UserRole     = 'USER' | 'ARTIST' | 'MODERATOR' | 'ADMIN'
-export type UserStatus   = 'ACTIVE' | 'SUSPENDED' | 'DELETED'
+export type UserRole = 'USER' | 'ARTIST' | 'MODERATOR' | 'ADMIN'
+export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED'
 export type AuthProvider = 'local' | 'google' | 'facebook'
 
 export type User = {
-  id:                    string
-  email:                 string
-  password_hash:         string | null
-  provider:              AuthProvider
-  provider_id:           string | null
+  id: string
+  email: string
+  password_hash: string | null
+  provider: AuthProvider
+  provider_id: string | null
   is_email_verified:     boolean
-  onboarded:             boolean
-  interests:             string[]
-  role:                  UserRole
-  status:                UserStatus
-  moodboards?:           Moodboard[] // Added from moodboard.types
-  token_version:         number
+  onboarded: boolean
+  interests: string[]
+  role: UserRole
+  status: UserStatus
+  moodboards?: Moodboard[] // Added from moodboard.types
+  token_version: number
   failed_login_attempts: number
-  locked_until:          Date | null
-  last_login_at:         Date | null
-  created_at:            Date
-  updated_at:            Date
-  deleted_at:            Date | null
+  locked_until: Date | null
+  last_login_at: Date | null
+  created_at: Date
+  updated_at: Date
+  deleted_at: Date | null
 }
 
 // Public-safe user shape for embedding in responses (no sensitive fields)
 export type PublicUser = {
-  id:                string
-  email:             string
-  role:              UserRole
+  id: string
+  email: string
+  role: UserRole
   is_email_verified: boolean
-  onboarded:         boolean
-  interests:         string[]
-  created_at:        Date
+  onboarded: boolean
+  interests: string[]
+  created_at: Date
 }
 
 export type AuthSession = {
-  id:                 string
-  user_id:            string
+  id: string
+  user_id: string
   refresh_token_hash: string
-  user_agent:         string | null
-  ip_address:         string | null
-  expires_at:         Date
-  created_at:         Date
-  last_used_at:       Date
-  revoked_at:         Date | null
+  user_agent: string | null
+  ip_address: string | null
+  expires_at: Date
+  created_at: Date
+  last_used_at: Date
+  revoked_at: Date | null
 }
 
 export type PasswordResetToken = {
-  id:               string
-  user_id:          string
+  id: string
+  user_id: string
   reset_token_hash: string
-  reset_email:       string
+  reset_email: string
   reset_attempts:   number
-  expires_at:       Date
-  used_at:          Date | null
-  created_at:       Date
+  expires_at: Date
+  used_at: Date | null
+  created_at: Date
 }
 
 export type AuditLog = {
@@ -154,15 +154,15 @@ export type ConversationParticipant = {
 }
 
 export type ParticipantProfile = {
-  user_id:      string
-  role:          ParticipantRole
+  user_id: string
+  role: ParticipantRole
   last_read_at: Date
-  is_muted:      boolean
-  joined_at:     Date
-  left_at:       Date | null
-  email:         string
+  is_muted: boolean
+  joined_at: Date
+  left_at: Date | null
+  email: string
   display_name:  string | null
-  avatar_url:    string | null
+  avatar_url: string | null
 }
 
 // ── Message ───────────────────────────────────────────────────────────────────

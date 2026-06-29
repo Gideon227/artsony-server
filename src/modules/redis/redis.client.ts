@@ -6,10 +6,10 @@ let instance: Redis | null = null
 export function getRedis(): Redis {
   if (!instance) {
     instance = new Redis(config.redis.url, {
-      keyPrefix:            config.redis.keyPrefix,
-      maxRetriesPerRequest: 3,
-      enableReadyCheck:     true,
-      lazyConnect:          false,
+      keyPrefix: config.redis.keyPrefix,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: true,
+      lazyConnect: false,
     })
     instance.on('error', (err) => {
       console.error('[Redis] Connection error:', err)
@@ -24,41 +24,41 @@ export function getRedis(): Redis {
 
 export const RedisTTL = {
   // Auth
-  session:             60 * 60 * 24 * 30, // 30 days
-  resetToken:          60 * 15,           // 15 min
-  emailVerify:         60 * 60 * 24,      // 24 hours
-  oauthState:          60 * 10,           // 10 min
-  loginAttempts:       60 * 30,           // 30 min lockout window
-  rtBlacklist:         60 * 60 * 24 * 30, // match refresh token lifetime
+  session: 60 * 60 * 24 * 30, // 30 days
+  resetToken: 60 * 15,           // 15 min
+  emailVerify: 60 * 60 * 24,      // 24 hours
+  oauthState: 60 * 10,           // 10 min
+  loginAttempts: 60 * 30,           // 30 min lockout window
+  rtBlacklist: 60 * 60 * 24 * 30, // match refresh token lifetime
 
   // Artwork
-  artworkSingle:       60 * 5,            // 5 min — individual artwork
-  artworkFeed:         60 * 2,            // 2 min — paginated list
+  artworkSingle: 60 * 5,            // 5 min — individual artwork
+  artworkFeed: 60 * 2,            // 2 min — paginated list
   artworkViewCooldown: 60 * 30,           // 30 min — deduplicate view counts
 
   // Cart
-  cart:                60 * 10,           // 10 min — full cart with artwork data
+  cart: 60 * 10,           // 10 min — full cart with artwork data
 
   // Order
-  orderSingle:         60 * 2,            // 2 min — single order detail
-  orderIdempotency:    60 * 60 * 24,      // 24 hours — checkout replay protection
+  orderSingle: 60 * 2,            // 2 min — single order detail
+  orderIdempotency: 60 * 60 * 24,      // 24 hours — checkout replay protection
 
   // Payment
-  paymentStatus:       60 * 2,            // 2 min — buyer polling payment state
-  verifyLock:          30,                // 30 s  — blockchain verify distributed lock
+  paymentStatus: 60 * 2,            // 2 min — buyer polling payment state
+  verifyLock: 30,                // 30 s  — blockchain verify distributed lock
 
   // Delivery
-  deliveryToken:       60 * 5,            // 5 min — validated download token metadata
+  deliveryToken: 60 * 5,            // 5 min — validated download token metadata
 
   // Idempotency middleware
-  httpIdempotency:     60 * 60 * 24,      // 24 hours — HTTP-layer mutation replay
+  httpIdempotency: 60 * 60 * 24,      // 24 hours — HTTP-layer mutation replay
 
   // Messaging & Notifications
-  msgIdempotency:      60 * 60 * 24,      // 24 hours — client-generated idempotency tracking
-  wsRateLimit:         60,                // 1 min — WebSocket rate limit window
-  convParticipants:    60 * 5,            // 5 min — participant array fallback cache
-  userUnreadCount:     60 * 60 * 24,      // 24 hours — conversation unread counter cache
-  userUnreadNotifs:    60 * 60 * 24,      // 24 hours — global notifications unread cache
+  msgIdempotency: 60 * 60 * 24,      // 24 hours — client-generated idempotency tracking
+  wsRateLimit: 60,                // 1 min — WebSocket rate limit window
+  convParticipants: 60 * 5,            // 5 min — participant array fallback cache
+  userUnreadCount: 60 * 60 * 24,      // 24 hours — conversation unread counter cache
+  userUnreadNotifs: 60 * 60 * 24,      // 24 hours — global notifications unread cache
 } as const
 
 export type RedisTTLKey = keyof typeof RedisTTL

@@ -12,6 +12,13 @@ import type {
 } from '@/common/types/artwork.types'
 
 // ── Row → Domain mapper ───────────────────────────────────────────────────────
+function parseJsonField<T>(value: any, fallback: T): T {
+  if (value == null) return fallback
+  if (typeof value === 'string') {
+    try { return JSON.parse(value) as T } catch { return fallback }
+  }
+  return value as T
+}
 
 function toArtwork(row: any): Artwork {
   return {
@@ -27,7 +34,7 @@ function toArtwork(row: any): Artwork {
     ['creator']: row['creator'],
     ['collaborator_ids']: row['collaborator_ids'] ?? [],
     ['tools_used']: row['tools_used'] ?? [],
-    ['assets']: (row['assets'] ?? []) as ArtworkAsset[],
+    ['assets']: parseJsonField<ArtworkAsset[]>(row['assets'], []),
     ['visibility']: row['visibility'],
     ['allow_moodboard_save']:  row['allow_moodboard_save'],
     ['allow_comments']: row['allow_comments'],
@@ -41,9 +48,9 @@ function toArtwork(row: any): Artwork {
     ['price']: row['price'] !== null ? Number(row['price']) : null,
     ['currency']: row['currency'],
     ['max_purchase_quantity']: row['max_purchase_quantity'] ?? null,
-    ['physical_details']: (row['physical_details'] ?? null) as PhysicalDetails | null,
+    ['physical_details']: parseJsonField<PhysicalDetails | null>(row['physical_details'], null),
     ['has_variants']: row['has_variants'],
-    ['variants']: (row['variants'] ?? []) as Variant[],
+    ['variants']: parseJsonField<Variant[]>(row['variants'], []),
     ['view_count']: row['view_count'],
     ['like_count']: row['like_count'],
     ['save_count']: row['save_count'],
@@ -54,6 +61,23 @@ function toArtwork(row: any): Artwork {
     ['deleted_at']: row['deleted_at'] ? new Date(row['deleted_at']) : null,
   }
 }
+
+const CREATOR_EMBED = `
+  *,
+  creator:users!artworks_creator_id_fkey (
+    id,
+    username,
+    role,
+    profile:profiles (
+      display_name,
+      avatar_url,
+      followers_count,
+      following_count,
+      artworks_count,
+      sales_count
+    )
+  )
+`
 
 // ── Repository ────────────────────────────────────────────────────────────────
 
@@ -122,7 +146,7 @@ export const artworkRepository = {
   async findById(id: string): Promise<Artwork | undefined> {
     const result = await (supabase() as any)
       .from('artworks')
-      .select('*')
+      .select(CREATOR_EMBED)
       .eq('id', id)
       .is('deleted_at', null)
       .single()
@@ -132,12 +156,13 @@ export const artworkRepository = {
     return toArtwork(result.data)
   },
 
+
   // ── FindBySlug ─────────────────────────────────────────────────────────────
 
   async findBySlug(slug: string): Promise<Artwork | undefined> {
     const result = await (supabase() as any)
       .from('artworks')
-      .select('*')
+      .select(CREATOR_EMBED)
       .eq('slug', slug)
       .is('deleted_at', null)
       .single()
@@ -343,17 +368,7 @@ export const artworkRepository = {
 
     let query = (supabase() as any)
       .from('artworks')
-      .select(`
-        *,
-        creator:profiles!artworks_creator_id_fkey (
-            id,
-            name,
-            avatar_url,
-            role,
-            stats,
-            recent_artworks:artworks(optimized_url) // Example of deeply nested relation
-        )
-      `, { count: 'exact' })
+      .select(CREATOR_EMBED, { count: 'exact' })
       .is('deleted_at', null)
 
     if (filters.creator_id)    query = query.eq('creator_id', filters.creator_id)

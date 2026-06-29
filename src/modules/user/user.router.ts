@@ -4,6 +4,7 @@ import { apiRateLimit } from '@/middleware/rate-limit.middleware'
 import {
   handleCompleteOnboarding,
   handleGetMe,
+  handleSearchUsers,
   onboardingValidation,
 } from './controllers/user.controller'
 
@@ -17,6 +18,7 @@ router.use(apiRateLimit)
 
 // GET /api/users/me — returns the authenticated user's profile
 router.get('/me', handleGetMe)
+router.get('/search', requireAuth, handleSearchUsers)
 
 // ─── Onboarding ───────────────────────────────────────────────────────────────
 

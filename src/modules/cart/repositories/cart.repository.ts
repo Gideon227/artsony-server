@@ -22,32 +22,64 @@ function toCartItem(row: any): CartItem {
 
 // Enriched: joins artwork + seller profile. Supabase select syntax handles
 // the join — we map both the cart item fields and the nested artwork shape.
+// function toCartItemWithArtwork(row: any): CartItemWithArtwork {
+//   const artwork = row['artwork']
+
+//   return {
+//     ...toCartItem(row),
+//     artwork: {
+//       id:                   artwork['id'],
+//       title:                artwork['title'],
+//       slug:                 artwork['slug'],
+//       thumbnail_url:        artwork['thumbnail_url'] ?? null,
+//       artwork_format:       artwork['artwork_format'],
+//       listing_type:         artwork['listing_type'],
+//       status:               artwork['status'],
+//       moderation_status:    artwork['moderation_status'],
+//       price:                artwork['price'] !== null ? Number(artwork['price']) : null,
+//       currency:             artwork['currency'],
+//       max_purchase_quantity:artwork['max_purchase_quantity'] ?? null,
+//       has_variants:         artwork['has_variants'],
+//       seller_id:            artwork['creator_id'],
+//       seller_name:          artwork['creator']?.['name'] ?? '',
+//       seller_avatar_url:    artwork['creator']?.['avatar_url'] ?? null,
+//     },
+//     // Staleness flags are computed in the service layer, not the repository.
+//     // We set safe defaults here so TypeScript is satisfied.
+//     is_price_changed:       false,
+//     is_unavailable:         false,
+//     is_stock_insufficient:  false,
+//   }
+// }
+
 function toCartItemWithArtwork(row: any): CartItemWithArtwork {
   const artwork = row['artwork']
+  // Safely extract the nested profile
+  const profile = artwork['creator']?.['profile']
 
   return {
     ...toCartItem(row),
     artwork: {
-      id:                   artwork['id'],
-      title:                artwork['title'],
-      slug:                 artwork['slug'],
-      thumbnail_url:        artwork['thumbnail_url'] ?? null,
-      artwork_format:       artwork['artwork_format'],
-      listing_type:         artwork['listing_type'],
-      status:               artwork['status'],
-      moderation_status:    artwork['moderation_status'],
-      price:                artwork['price'] !== null ? Number(artwork['price']) : null,
-      currency:             artwork['currency'],
-      max_purchase_quantity:artwork['max_purchase_quantity'] ?? null,
-      has_variants:         artwork['has_variants'],
-      seller_id:            artwork['creator_id'],
-      seller_name:          artwork['creator']?.['name'] ?? '',
-      seller_avatar_url:    artwork['creator']?.['avatar_url'] ?? null,
+      id: artwork['id'],
+      title: artwork['title'],
+      slug: artwork['slug'],
+      thumbnail_url: artwork['thumbnail_url'] ?? null,
+      artwork_format: artwork['artwork_format'],
+      listing_type: artwork['listing_type'],
+      status: artwork['status'],
+      moderation_status: artwork['moderation_status'],
+      price: artwork['price'] !== null ? Number(artwork['price']) : null,
+      currency: artwork['currency'],
+      max_purchase_quantity: artwork['max_purchase_quantity'] ?? null,
+      has_variants: artwork['has_variants'],
+      
+      // Update these three lines to navigate into the profile object
+      seller_id: artwork['creator']?.['id'] ?? null,
+      seller_name: profile?.['display_name'] ?? artwork['creator']?.['username'] ?? '',
+      seller_avatar_url: profile?.['avatar_url'] ?? null,
     },
-    // Staleness flags are computed in the service layer, not the repository.
-    // We set safe defaults here so TypeScript is satisfied.
-    is_price_changed:       false,
-    is_unavailable:         false,
+    is_price_changed: false,
+    is_unavailable: false,
     is_stock_insufficient:  false,
   }
 }
@@ -60,32 +92,54 @@ export const cartRepository = {
   // Returns all cart items for the user joined with the artwork and its
   // creator profile. Ordered by most recently added first.
 
+  // async findByUser(userId: string): Promise<CartItemWithArtwork[]> {
+  //   const result = await (supabase() as any)
+  //     .from('cart_items')
+  //     .select(`
+  //       *,
+  //       artwork:artworks (
+  //         *,
+  //         creator:users!artworks_creator_id_fkey (
+  //           id,
+  //           username,
+  //           role,
+  //           profile:profiles (
+  //             display_name,
+  //             avatar_url,
+  //             followers_count,
+  //             following_count,
+  //             artworks_count,
+  //             sales_count
+  //           )
+  //         )
+  //       )
+  //     `)
+  //     .eq('user_id', userId)
+  //     .order('added_at', { ascending: false })
+
+  //   assertNoErrorMany(result, 'cart.findByUser')
+  //   return (result.data ?? []).map(toCartItemWithArtwork)
+  // },
+
   async findByUser(userId: string): Promise<CartItemWithArtwork[]> {
     const result = await (supabase() as any)
       .from('cart_items')
       .select(`
         *,
         artwork:artworks!cart_items_artwork_id_fkey (
-          id,
-          title,
-          slug,
-          thumbnail_url,
-          artwork_format,
-          listing_type,
-          status,
-          moderation_status,
-          visibility,
-          is_flagged,
-          price,
-          currency,
-          max_purchase_quantity,
-          has_variants,
-          variants,
-          physical_details,
-          creator_id,
-          creator:profiles!artworks_creator_id_fkey (
-            name,
-            avatar_url
+          *,
+          creator:users!artworks_creator_id_fkey (
+            id,
+            username,
+            role,
+            profile:profiles!profiles_user_id_fkey (
+              display_name,
+              avatar_url,
+              followers_count,
+              following_count,
+              artworks_count,
+              sales_count
+            )
           )
         )
       `)
