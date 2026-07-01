@@ -39,6 +39,10 @@ export const RedisTTL = {
   // Cart
   cart: 60 * 10,           // 10 min — full cart with artwork data
 
+  // Physical order
+  orderCancelLock: 10,              // 10s — prevent concurrent cancel race
+  orderPhysicalView: 60 * 2,        // 2 min — physical item view cache
+
   // Order
   orderSingle: 60 * 2,            // 2 min — single order detail
   orderIdempotency: 60 * 60 * 24,      // 24 hours — checkout replay protection
@@ -123,6 +127,10 @@ export const RedisKeys = {
 
   // ── Idempotency middleware ─────────────────────────────────────────────────
   httpIdempotency:(userId: string, key: string)   => `idempotency:${userId}:${key}`,
+
+  // ── Physical order pipeline ──────────────────────────────────────────────
+  orderCancelLock: (physicalId: string) => `order:cancel:lock:${physicalId}`,
+  physicalView:    (physicalId: string) => `physical:view:${physicalId}`,
 } as const
 
 // ── Generic typed helpers ─────────────────────────────────────────────────────

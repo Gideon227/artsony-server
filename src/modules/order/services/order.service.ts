@@ -446,6 +446,37 @@ export const orderService = {
     // Queue buyer confirmation email (fire and forget — never blocks order fulfillment)
     void this.sendOrderConfirmationEmail(order)
 
+    // ── Boot physical pipeline for all PHYSICAL order items ───────────────────
+    // Runs after wallet credit and email — entirely fire-and-forget.
+    // A failure here must never roll back a confirmed payment.
+    if (hasPhysical) {
+      const physicalItems = order.items.filter(i => i.artwork_format === 'PHYSICAL')
+
+      // Group items by seller so each artist gets one grouped notification
+      const sellerItemMap = new Map<string, Array<{ orderItemId: string }>>()
+      for (const item of physicalItems) {
+        const list = sellerItemMap.get(item.seller_id) ?? []
+        list.push({ orderItemId: item.id })
+        sellerItemMap.set(item.seller_id, list)
+      }
+
+      for (const [sellerId, items] of sellerItemMap) {
+        import('../services/physical-order.service.js')
+          .then(({ physicalOrderService }) =>
+            physicalOrderService.initPhysicalPipeline({
+              orderId,
+              buyerId:     order.buyer_id,
+              sellerId,
+              items,
+              generatedBy: order.buyer_id,
+            }),
+          )
+          .catch(err =>
+            console.error('[orderService] physicalOrderService.initPhysicalPipeline failed:', err),
+          )
+      }
+    }
+
     invalidateOrderCache(orderId)
     return updated
   },

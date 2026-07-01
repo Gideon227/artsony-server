@@ -318,3 +318,246 @@ export const TRANSACTION_TRANSITIONS: Record<TransactionStatus, TransactionStatu
   FAILED: [],
   EXPIRED: [],
 }
+// ── Physical Order Pipeline ───────────────────────────────────────────────────
+// Only applies to order items where artwork_format === 'PHYSICAL'.
+// Decoupled from OrderStatus (payment state machine) intentionally.
+
+export type TimelineStatus =
+  | 'ORDER_RECEIVED'
+  | 'ORDER_RECEIVED_ACTIVE'
+  | 'AWAITING_CONFIRMATION'
+  | 'AWAITING_CONFIRMATION_ACTIVE'
+  | 'ORDER_FAILED_TO_CONFIRM'
+  | 'AWAITING_PICKUP'
+  | 'AWAITING_PICKUP_ACTIVE'
+  | 'PICKUP_FAILED'
+  | 'COURIER_REJECTED_PICKUP'
+  | 'PICKED_UP'
+  | 'PICKED_UP_ACTIVE'
+  | 'IN_TRANSIT'
+  | 'IN_TRANSIT_ACTIVE'
+  | 'DELAYED_DELIVERY'
+  | 'OUT_FOR_DELIVERY'
+  | 'OUT_FOR_DELIVERY_ACTIVE'
+  | 'DELIVERED'
+  | 'DELIVERY_FAILED'
+
+// Delivery status is the buyer/artist-facing display grouping —
+// independent of the granular timeline_status.
+export type DeliveryStatus = 'LIVE' | 'DELIVERED' | 'CANCELLED'
+
+export type RefundStatus =
+  | 'NONE'
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'PARTIAL'
+
+export type CourierServiceType = 'STANDARD' | 'EXPRESS' | 'OVERNIGHT' | 'ECONOMY'
+
+// ── Order Item Physical State ─────────────────────────────────────────────────
+// Per-item physical pipeline state. Each physical item has its own timeline
+// since items can be picked up and shipped separately.
+
+export type OrderItemPhysical = {
+  id: string
+  order_item_id: string
+  order_id: string
+  timeline_status: TimelineStatus
+  delivery_status: DeliveryStatus
+  // Shipping
+  shipping_cost: number | null
+  courier_name: string | null
+  courier_service_type: CourierServiceType | null
+  tracking_id: string | null
+  estimated_delivery_date: Date | null
+  pickup_address: string | null
+  // Refund
+  refund_status: RefundStatus
+  refund_amount: number | null
+  refund_initiated_at: Date | null
+  refund_completed_at: Date | null
+  refund_notes: string | null
+  // Timestamps
+  confirmed_at: Date | null
+  picked_up_at: Date | null
+  in_transit_at: Date | null
+  delivered_at: Date | null
+  created_at: Date
+  updated_at: Date
+}
+
+// ── Order Timeline Event ──────────────────────────────────────────────────────
+// Append-only. Never updated, never deleted.
+
+export type OrderTimelineEvent = {
+  id: string
+  order_item_physical_id: string
+  order_id: string
+  order_item_id: string
+  timeline_status: TimelineStatus
+  is_pending: boolean              // false = this state is fully active/confirmed
+  actor_id: string | null
+  actor_role: 'buyer' | 'artist' | 'admin' | 'system' | 'courier'
+  notes: string | null
+  metadata: Record<string, unknown>
+  occurred_at: Date
+}
+
+// ── Delivery Proof ────────────────────────────────────────────────────────────
+
+export type DeliveryProof = {
+  id: string
+  order_item_physical_id: string
+  order_id: string
+  cloudinary_public_id: string
+  secure_url: string
+  mime_type: string
+  file_size_bytes: number
+  uploaded_by: string
+  uploader_role: 'admin' | 'courier'
+  uploaded_at: Date
+}
+
+// ── Invoice ───────────────────────────────────────────────────────────────────
+
+export type OrderInvoice = {
+  id: string
+  order_id: string
+  version: number
+  pdf_cloudinary_public_id: string
+  pdf_url: string
+  generated_at: Date
+  generated_by: string           // user id who triggered generation
+  trigger: 'order_created' | 'refund_processed' | 'admin_request'
+}
+
+// ── Receipt ────────────────────────────────────────────────────────────────────
+// Proof of payment — distinct from the invoice. A receipt confirms that
+// payment was received (amount, method, transaction reference) and is
+// issued exactly once per order at payment confirmation. It is never
+// re-versioned. The invoice, by contrast, itemizes goods/services,
+// agreed-upon prices, and payment terms, and can be regenerated.
+
+export type OrderReceipt = {
+  id: string
+  order_id: string
+  pdf_cloudinary_public_id: string
+  pdf_url: string
+  amount_paid: number
+  currency: string
+  payment_method: string
+  transaction_reference: string | null
+  generated_at: Date
+  generated_by: string
+}
+
+// ── Refund Request ────────────────────────────────────────────────────────────
+// Artists request; admins approve.
+
+export type RefundRequest = {
+  id: string
+  order_item_physical_id: string
+  order_id: string
+  requested_by: string           // user id (always an artist)
+  reason: string
+  status: 'PENDING_ADMIN' | 'APPROVED' | 'REJECTED'
+  admin_notes: string | null
+  reviewed_by: string | null
+  reviewed_at: Date | null
+  created_at: Date
+}
+
+// ── Service fee constant ──────────────────────────────────────────────────────
+export const PLATFORM_SERVICE_FEE_RATE = 0.14  // 14% of item cost (not shipping)
+
+// ── Physical pipeline state machine ──────────────────────────────────────────
+// Maps each state to the set of states it can transition into.
+// Admins only — artists/buyers have narrower permission checks in the service.
+
+export const PHYSICAL_TRANSITIONS: Record<TimelineStatus, TimelineStatus[]> = {
+  ORDER_RECEIVED:                    ['ORDER_RECEIVED_ACTIVE'],
+  ORDER_RECEIVED_ACTIVE:             ['AWAITING_CONFIRMATION'],
+  AWAITING_CONFIRMATION:             ['AWAITING_CONFIRMATION_ACTIVE', 'ORDER_FAILED_TO_CONFIRM'],
+  AWAITING_CONFIRMATION_ACTIVE:      ['AWAITING_PICKUP', 'ORDER_FAILED_TO_CONFIRM'],
+  ORDER_FAILED_TO_CONFIRM:           [],
+  AWAITING_PICKUP:                   ['AWAITING_PICKUP_ACTIVE', 'PICKUP_FAILED', 'COURIER_REJECTED_PICKUP'],
+  AWAITING_PICKUP_ACTIVE:            ['PICKED_UP', 'PICKUP_FAILED', 'COURIER_REJECTED_PICKUP'],
+  PICKUP_FAILED:                     ['AWAITING_PICKUP'],
+  COURIER_REJECTED_PICKUP:           ['AWAITING_PICKUP'],
+  PICKED_UP:                         ['PICKED_UP_ACTIVE'],
+  PICKED_UP_ACTIVE:                  ['IN_TRANSIT'],
+  IN_TRANSIT:                        ['IN_TRANSIT_ACTIVE'],
+  IN_TRANSIT_ACTIVE:                 ['OUT_FOR_DELIVERY', 'DELAYED_DELIVERY', 'DELIVERY_FAILED'],
+  DELAYED_DELIVERY:                  ['OUT_FOR_DELIVERY', 'DELIVERY_FAILED'],
+  OUT_FOR_DELIVERY:                  ['OUT_FOR_DELIVERY_ACTIVE'],
+  OUT_FOR_DELIVERY_ACTIVE:           ['DELIVERED', 'DELIVERY_FAILED'],
+  DELIVERED:                         [],
+  DELIVERY_FAILED:                   [],
+}
+
+// ── Cancellation boundary ─────────────────────────────────────────────────────
+// Buyer or artist can only cancel while the item is within these states.
+export const BUYER_ARTIST_CANCELLABLE_STATES = new Set<TimelineStatus>([
+  'ORDER_RECEIVED',
+  'ORDER_RECEIVED_ACTIVE',
+  'AWAITING_CONFIRMATION',
+  'AWAITING_CONFIRMATION_ACTIVE',
+])
+
+// ── Extended filters ──────────────────────────────────────────────────────────
+
+export type PhysicalOrderFilters = {
+  delivery_status?: DeliveryStatus | undefined
+  timeline_status?: TimelineStatus | undefined
+  timeline_status_in?: TimelineStatus[] | undefined
+  refund_status?: RefundStatus | undefined
+  courier_name?: string | undefined
+  tracking_id?: string | undefined
+  page?: number | undefined
+  limit?: number | undefined
+  sort_order?: 'asc' | 'desc' | undefined
+  date_from?: string | undefined
+  date_to?: string | undefined
+  order_number?: string | undefined
+  artist_id?: string | undefined
+  buyer_id?: string | undefined
+}
+
+// Extended order with physical fields — returned by physical order endpoints
+export type PhysicalOrderView = Order & {
+  order_number: string
+  physical_items: (OrderItem & {
+    physical: OrderItemPhysical | null
+    timeline: OrderTimelineEvent[]
+    delivery_proofs: DeliveryProof[]
+  })[]
+  invoice: OrderInvoice | null
+  receipt: OrderReceipt | null
+  refund_requests: RefundRequest[]
+  buyer: { id: string; username: string; avatar_url: string | null } | null
+  seller: { id: string; username: string; avatar_url: string | null } | null
+}
+
+// ── Named list-view presets ───────────────────────────────────────────────────
+// The buyer/artist UI tabs ("All", "Live", "Delivered", "Cancelled" for
+// buyers; "All", "Live", "Pending", "Completed", "Cancelled" for artists)
+// map to combinations of delivery_status/timeline_status that the frontend
+// should not have to reconstruct. These presets are resolved server-side
+// in the service layer into the underlying PhysicalOrderFilters.
+
+export type BuyerOrderView = 'all' | 'live' | 'delivered' | 'cancelled'
+
+export type ArtistOrderView = 'all' | 'live' | 'pending' | 'completed' | 'cancelled'
+
+// "Pending" for an artist = items not yet confirmed (ORDER_RECEIVED /
+// ORDER_RECEIVED_ACTIVE / AWAITING_CONFIRMATION / AWAITING_CONFIRMATION_ACTIVE).
+// "Live" = confirmed and in the shipping pipeline, not yet delivered/cancelled.
+// "Completed" = DELIVERED. "Cancelled" = delivery_status CANCELLED.
+export const ARTIST_PENDING_STATUSES: TimelineStatus[] = [
+  'ORDER_RECEIVED',
+  'ORDER_RECEIVED_ACTIVE',
+  'AWAITING_CONFIRMATION',
+  'AWAITING_CONFIRMATION_ACTIVE',
+]

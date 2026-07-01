@@ -17,6 +17,7 @@ import { deliveryRouter } from './modules/delivery/routes/delivery.routes'
 import { uploadRouter } from './modules/upload/routes/upload.routes'
 import { messagingRouter } from './modules/messaging/routes/messaging.router'
 import { notificationRouter } from './modules/messaging/routes/notification.router'
+import { physicalOrderRouter } from './modules/order/routes/physical-order.routes'
 
 // Middleware & Config
 import { errorHandler, notFoundHandler } from './middleware/error.middleware'
@@ -95,6 +96,7 @@ export function createApp() {
   app.use('/api/upload', uploadRouter)
   app.use('/api/conversations', messagingRouter)
   app.use('/api/notifications', notificationRouter)
+  app.use('/api/physical-orders', physicalOrderRouter)
 
   // Note: In any specific router that needs onboarding protection, import and use:
   // router.use(requireAuth, requireOnboarded)

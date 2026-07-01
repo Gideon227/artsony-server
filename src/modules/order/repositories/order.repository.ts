@@ -213,6 +213,40 @@ export const orderRepository = {
     return toOrder(orderResult.data, items)
   },
 
+  // ── UpdateShippingAddress ──────────────────────────────────────────────────
+  // Admin-only. Buyers and artists cannot edit order/address details once
+  // placed — the shipping_address snapshot is otherwise immutable by design.
+  // This is the single sanctioned mutation path for that field.
+
+  async updateShippingAddress(
+    orderId: string,
+    address: ShippingAddressSnapshot,
+  ): Promise<Order | undefined> {
+    const result = await (supabase() as any)
+      .from('orders')
+      .update({
+        shipping_address: address,
+        updated_at:       new Date().toISOString(),
+      })
+      .eq('id', orderId)
+      .select('*')
+      .single()
+
+    if (result.error?.code === 'PGRST116') return undefined
+    assertNoError(result, 'order.updateShippingAddress')
+
+    const itemsResult = await (supabase() as any)
+      .from('order_items')
+      .select('*')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: true })
+
+    assertNoErrorMany(itemsResult, 'order.updateShippingAddress.items')
+    const items = (itemsResult.data ?? []).map(toOrderItem)
+
+    return toOrder(result.data, items)
+  },
+
   // ── FindByIdempotencyKey ───────────────────────────────────────────────────
   // Used at checkout initiation to detect duplicate requests.
 
@@ -478,9 +512,12 @@ export const orderRepository = {
     }
   },
 
-  // ── GetSellerBalance ───────────────────────────────────────────────────────
+  // ── GetWalletBalance ───────────────────────────────────────────────────────
+  // Generic — works for any user_id (seller, buyer, etc). The ledger itself
+  // is not role-scoped; "seller" balances and "buyer" balances are the same
+  // table, same semantics. Use this name for all new call sites.
 
-  async getSellerBalance(userId: string): Promise<number> {
+  async getWalletBalance(userId: string): Promise<number> {
     const result = await (supabase() as any)
       .from('wallet_ledger')
       .select('balance_after')
@@ -491,5 +528,13 @@ export const orderRepository = {
 
     if (result.error || !result.data) return 0
     return Number(result.data.balance_after)
+  },
+
+  // ── GetSellerBalance ───────────────────────────────────────────────────────
+  // @deprecated Kept for backward compatibility with existing call sites.
+  // Use getWalletBalance — this function is not actually seller-specific.
+
+  async getSellerBalance(userId: string): Promise<number> {
+    return this.getWalletBalance(userId)
   },
 }

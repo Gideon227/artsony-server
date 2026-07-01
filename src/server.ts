@@ -4,6 +4,7 @@ import { createWsServer } from './modules/ws/ws.server'
 import { closePubSub } from './modules/redis/redis.pubsub'
 import { getRedis } from './modules/redis/redis.client'
 import { startExpireScheduler } from './modules/payment/jobs/payment.job'
+import './modules/order/jobs/order-confirmation-timeout.job'
 import { config } from './config'
 
 const app = createApp()
