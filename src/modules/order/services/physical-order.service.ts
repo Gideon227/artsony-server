@@ -758,7 +758,7 @@ export const physicalOrderService = {
     if (!physical) throw new NotFoundError('Physical order item')
 
     const refundRequestPatch: { status: RefundRequest['status']; reviewed_by: string; admin_notes?: string } = {
-      status:      input.decision === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+      status: input.decision === 'APPROVED' ? 'APPROVED' : 'REJECTED',
       reviewed_by: input.actorId,
     }
     if (input.admin_notes !== undefined) refundRequestPatch.admin_notes = input.admin_notes
@@ -771,10 +771,10 @@ export const physicalOrderService = {
       if (buyerId) {
         await notify({
           recipientIds: [buyerId],
-          type:         'order_update',
-          body:         `Your refund request for order ${input.order_number ?? physical.order_id} was declined.${input.admin_notes ? ` Note: ${input.admin_notes}` : ''}`,
-          metadata:     { order_id: physical.order_id },
-          orderId:      physical.order_id,
+          type: 'order_update',
+          body: `Your refund request for order ${input.order_number ?? physical.order_id} was declined.${input.admin_notes ? ` Note: ${input.admin_notes}` : ''}`,
+          metadata: { order_id: physical.order_id },
+          orderId: physical.order_id,
         })
       }
 
