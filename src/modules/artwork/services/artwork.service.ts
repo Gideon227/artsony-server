@@ -145,8 +145,13 @@ function validateConditionalFields(input: CreateArtworkInput): void {
 export async function createArtwork(
   input: CreateArtworkInput,
   creatorId: string,
+  requesterRole: UserRole,
 ): Promise<Artwork> {
   validateConditionalFields(input)
+
+  if (input.listing_type === 'MARKETPLACE') {
+    assertCanPublishMarketplace(requesterRole)
+  }
 
   // Explicitly validate any EXTERNAL_LINK assets before touching the DB
   if (input.assets && Array.isArray(input.assets)) {
@@ -288,6 +293,8 @@ export async function publishArtwork(
   }
 
   if (artwork.listing_type === 'MARKETPLACE') {
+    assertCanPublishMarketplace(requesterRole)
+
     if (artwork.price === null || artwork.price === undefined || artwork.price <= 0) {
       throw new ValidationError('Validation failed', {
         price: 'A valid price greater than 0 is required to publish a MARKETPLACE listing',
@@ -418,6 +425,22 @@ function enforceOwnershipOrModerator(
   if (artwork.creator_id !== requesterId) {
     throw new ForbiddenError('You do not own this artwork')
   }
+}
+
+// Seller Registration integration point. role === 'ARTIST' is set/unset by
+// transition_seller_registration() when an admin approves/suspends a seller
+// (see 20240701000000_seller_registration_schema.sql) — checking the role
+// claim directly means this guard costs zero extra DB/Redis lookups on the
+// artwork create/publish hot path. ADMIN bypasses (consistent with
+// enforceOwnershipOrModerator); MODERATOR does not — moderating content is a
+// different privilege from being a commercial seller.
+function assertCanPublishMarketplace(requesterRole: UserRole): void {
+  if (requesterRole === 'ARTIST' || requesterRole === 'ADMIN') return
+  throw new AppError(
+    'Only approved sellers can create or publish MARKETPLACE listings',
+    403,
+    'SELLER_NOT_APPROVED',
+  )
 }
 
 // ── Purchasability Guard ──────────────────────────────────────────────────────

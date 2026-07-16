@@ -6,7 +6,13 @@ export type ListingType = 'MARKETPLACE' | 'PORTFOLIO'
 export type ArtworkFormat = 'DIGITAL' | 'PHYSICAL'
 export type ArtworkMediaType = 'IMAGE' | 'VIDEO' | 'THREE_D' | 'EXTERNAL_LINK'
 export type ArtworkVisibility = 'PUBLIC' | 'PRIVATE' | 'UNLISTED'
-export type ArtworkStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' | 'UNDER_REVIEW'
+// PAUSED: set automatically when an approved seller is suspended or later
+// rejected (after having published MARKETPLACE artwork) — hides the artwork
+// from public discovery/purchase while preserving likes/comments/saves.
+// Restored to PUBLISHED automatically on reactivation. See
+// transition_seller_registration() in
+// 20240701000000_seller_registration_schema.sql.
+export type ArtworkStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' | 'UNDER_REVIEW' | 'PAUSED'
 export type ModerationStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'FLAGGED'
 
 // ── Nested JSONB shapes ───────────────────────────────────────────────────────

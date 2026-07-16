@@ -122,6 +122,11 @@ export const paymentService = {
       switch (result.reason) {
         case 'PENDING':
         case 'NOT_FOUND':
+        // RETRYABLE = the explorer API itself failed (timeout, rate limit,
+        // non-2xx, network error) — this says nothing about the on-chain
+        // outcome, so it must not be treated the same as a genuine payment
+        // failure. Retry under the same backoff as PENDING/NOT_FOUND.
+        case 'RETRYABLE':
           await orderRepository.updateTransaction(transactionId, {
             retry_count:   tx.retry_count + 1,
             last_retry_at: new Date(),

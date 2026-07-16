@@ -42,6 +42,15 @@ export const checkoutValidation = [
     .isLength({ max: 1000 })
     .trim()
     .withMessage('notes cannot exceed 1000 characters'),
+  // Saved address reference — mutually exclusive with the inline snapshot below
+  body('shipping_address_id')
+    .optional()
+    .isUUID()
+    .withMessage('shipping_address_id must be a valid UUID'),
+  body('save_address')
+    .optional()
+    .isBoolean()
+    .withMessage('save_address must be a boolean'),
   // Shipping address — required for physical orders, validated if present
   body('shipping_address.full_name')
     .optional()
@@ -164,7 +173,9 @@ export async function handleCheckout(
       cart_item_ids:    (b['cart_item_ids'] as string[]).map(String),
       idempotency_key:  String(b['idempotency_key']),
       ...(b['notes'] && { notes: String(b['notes']) }),
+      ...(b['shipping_address_id'] !== undefined && { shipping_address_id: String(b['shipping_address_id']) }),
       ...(b['shipping_address'] !== undefined && { shipping_address: b['shipping_address'] }),
+      ...(b['save_address'] !== undefined && { save_address: Boolean(b['save_address']) }),
     }
 
     const result = await orderService.initiateCheckout(req.auth.sub, input)

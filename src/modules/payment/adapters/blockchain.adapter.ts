@@ -4,7 +4,11 @@ import type { WalletNetwork } from '@/common/types/commerce.types'
 
 export type VerifyResult =
   | { confirmed: true;  block: number; amount: number; recipient: string }
-  | { confirmed: false; reason: 'NOT_FOUND' | 'PENDING' | 'WRONG_RECIPIENT' | 'WRONG_AMOUNT' | 'FAILED' }
+  // FAILED = a genuine on-chain outcome (reverted tx, wrong recipient/amount)
+  // and is terminal. RETRYABLE = the explorer API itself failed (timeout,
+  // rate limit, non-2xx, network error) and says nothing about the on-chain
+  // outcome — it must be retried, not treated as a payment failure.
+  | { confirmed: false; reason: 'NOT_FOUND' | 'PENDING' | 'WRONG_RECIPIENT' | 'WRONG_AMOUNT' | 'FAILED' | 'RETRYABLE' }
 
 export interface BlockchainAdapter {
   verifyTransaction(
@@ -41,11 +45,12 @@ export class TronAdapter implements BlockchainAdapter {
       )
 
       if (res.status === 404) return { confirmed: false, reason: 'NOT_FOUND' }
-      if (!res.ok) return { confirmed: false, reason: 'FAILED' }
+      if (!res.ok) return { confirmed: false, reason: 'RETRYABLE' }
 
       const data = await res.json() as Record<string, any>
 
-      // Check finality
+      // Check finality. A receipt with contractRet !== 'SUCCESS' is a real
+      // on-chain revert (terminal); no receipt yet just means not mined (retry).
       const receipt = data?.['ret']?.[0]
       if (!receipt || receipt['contractRet'] !== 'SUCCESS') {
         return { confirmed: false, reason: receipt ? 'FAILED' : 'PENDING' }
@@ -82,7 +87,7 @@ export class TronAdapter implements BlockchainAdapter {
 
       return { confirmed: true, block, amount: amountUsdt, recipient: recipientHex }
     } catch {
-      return { confirmed: false, reason: 'FAILED' }
+      return { confirmed: false, reason: 'RETRYABLE' }
     }
   }
 }
@@ -109,7 +114,7 @@ export class EthereumAdapter implements BlockchainAdapter {
       url.searchParams.set('apikey', ETHERSCAN_KEY)
 
       const res  = await fetch(url.toString(), { signal: AbortSignal.timeout(10_000) })
-      if (!res.ok) return { confirmed: false, reason: 'FAILED' }
+      if (!res.ok) return { confirmed: false, reason: 'RETRYABLE' }
 
       const data   = await res.json() as Record<string, any>
       const result = data?.['result']
@@ -148,7 +153,7 @@ export class EthereumAdapter implements BlockchainAdapter {
 
       return { confirmed: true, block, amount: amountUsdt, recipient: logRecipient }
     } catch {
-      return { confirmed: false, reason: 'FAILED' }
+      return { confirmed: false, reason: 'RETRYABLE' }
     }
   }
 }
@@ -175,7 +180,7 @@ export class BscAdapter implements BlockchainAdapter {
       url.searchParams.set('apikey', BSCSCAN_KEY)
 
       const res  = await fetch(url.toString(), { signal: AbortSignal.timeout(10_000) })
-      if (!res.ok) return { confirmed: false, reason: 'FAILED' }
+      if (!res.ok) return { confirmed: false, reason: 'RETRYABLE' }
 
       const data   = await res.json() as Record<string, any>
       const result = data?.['result']
@@ -209,7 +214,7 @@ export class BscAdapter implements BlockchainAdapter {
 
       return { confirmed: true, block, amount: amountUsdt, recipient: logRecipient }
     } catch {
-      return { confirmed: false, reason: 'FAILED' }
+      return { confirmed: false, reason: 'RETRYABLE' }
     }
   }
 }

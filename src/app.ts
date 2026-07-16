@@ -10,6 +10,7 @@ import path from 'path'
 // Modules
 import { authRouter } from './modules/auth/auth.router'
 import { userRouter } from './modules/user/user.router'
+import { sellerRouter } from './modules/seller/routes/seller.routes'
 import { artworkRouter } from './modules/artwork/routes/artwork.routes'
 import { cartRouter } from './modules/cart/routes/cart.routes'
 import { orderRouter } from './modules/order/routes/order.routes'
@@ -18,6 +19,7 @@ import { uploadRouter } from './modules/upload/routes/upload.routes'
 import { messagingRouter } from './modules/messaging/routes/messaging.router'
 import { notificationRouter } from './modules/messaging/routes/notification.router'
 import { physicalOrderRouter } from './modules/order/routes/physical-order.routes'
+import { shippingAddressRouter } from './modules/shipping-address/routes/shipping-address.routes'
 
 // Middleware & Config
 import { errorHandler, notFoundHandler } from './middleware/error.middleware'
@@ -89,6 +91,7 @@ export function createApp() {
   
   app.use('/api/auth', authRouter)
   app.use('/api/users', userRouter)
+  app.use('/api/seller-registrations', sellerRouter)
   app.use('/api/artworks', artworkRouter)
   app.use('/api/cart', cartRouter)
   app.use('/api/orders', orderRouter)
@@ -97,6 +100,7 @@ export function createApp() {
   app.use('/api/conversations', messagingRouter)
   app.use('/api/notifications', notificationRouter)
   app.use('/api/physical-orders', physicalOrderRouter)
+  app.use('/api/shipping-addresses', shippingAddressRouter)
 
   // Note: In any specific router that needs onboarding protection, import and use:
   // router.use(requireAuth, requireOnboarded)

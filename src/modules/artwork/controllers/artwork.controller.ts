@@ -231,7 +231,7 @@ export async function handleCreateArtwork(
       ...(body['variants'] !== undefined ? { variants: body['variants'] } : {}),
     }
 
-    const artwork = await artworkService.createArtwork(input, req.auth.sub)
+    const artwork = await artworkService.createArtwork(input, req.auth.sub, req.auth.role as UserRole)
 
     res.status(201).json({ success: true, data: artwork })
   } catch (err) {

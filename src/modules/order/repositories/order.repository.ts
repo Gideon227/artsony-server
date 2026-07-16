@@ -125,67 +125,42 @@ export const orderRepository = {
       expires_at:               Date
     }
   }): Promise<{ order: Order; transaction: Transaction }> {
-    // 1. Insert order
-    const orderResult = await (supabase() as any)
-      .from('orders')
-      .insert({
-        buyer_id:         input.buyer_id,
-        subtotal:         input.subtotal,
-        currency:         input.currency,
-        shipping_address: input.shipping_address,
-        idempotency_key:  input.idempotency_key,
-        notes:            input.notes,
-        status:           'PENDING_PAYMENT',
-      })
-      .select('*')
-      .single()
+    // Single RPC call — order, order_items, and transaction all insert
+    // inside one PL/pgSQL function invocation, so a failure on any of them
+    // (including the idempotency_key unique violation) rolls back the
+    // whole thing. No orphaned order row, no partial order_items.
+    // See 20240801000000_checkout_atomicity.sql for the function body.
+    const result = await (supabase() as any).rpc('create_order_with_items', {
+      p_buyer_id:         input.buyer_id,
+      p_subtotal:         input.subtotal,
+      p_currency:         input.currency,
+      p_shipping_address: input.shipping_address,
+      p_idempotency_key:  input.idempotency_key,
+      p_notes:            input.notes,
+      p_items:            input.items,
+      p_tx_amount:        input.transaction.amount,
+      p_tx_currency:      input.transaction.currency,
+      p_tx_network:       input.transaction.network,
+      p_tx_recipient:     input.transaction.recipient_wallet_address,
+      p_tx_expires_at:    input.transaction.expires_at.toISOString(),
+    })
 
-    assertNoError(orderResult, 'order.create')
-    const orderRow = orderResult.data
+    if (result.error) {
+      // Preserve the Postgres error code (e.g. 23505 on idempotency_key)
+      // so the service layer can distinguish a duplicate-request race
+      // from a genuine failure, mirroring seller.repository.submit.
+      throw Object.assign(
+        new Error(`[Supabase:order.createWithItems] ${result.error.message}`),
+        { code: result.error.code as string | undefined },
+      )
+    }
 
-    // 2. Insert all order items
-    const itemsPayload = input.items.map(item => ({
-      order_id:              orderRow.id,
-      artwork_id:            item.artwork_id,
-      seller_id:             item.seller_id,
-      artwork_title:         item.artwork_title,
-      artwork_slug:          item.artwork_slug,
-      artwork_thumbnail_url: item.artwork_thumbnail_url,
-      artwork_format:        item.artwork_format,
-      unit_price:            item.unit_price,
-      currency:              item.currency,
-      quantity:              item.quantity,
-      variant_snapshot:      item.variant_snapshot,
-    }))
-
-    const itemsResult = await (supabase() as any)
-      .from('order_items')
-      .insert(itemsPayload)
-      .select('*')
-
-    assertNoErrorMany(itemsResult, 'order.createItems')
-    const items = (itemsResult.data ?? []).map(toOrderItem)
-
-    // 3. Insert transaction
-    const txResult = await (supabase() as any)
-      .from('transactions')
-      .insert({
-        order_id:                 orderRow.id,
-        amount:                   input.transaction.amount,
-        currency:                 input.transaction.currency,
-        network:                  input.transaction.network,
-        recipient_wallet_address: input.transaction.recipient_wallet_address,
-        expires_at:               input.transaction.expires_at.toISOString(),
-        status:                   'PENDING',
-      })
-      .select('*')
-      .single()
-
-    assertNoError(txResult, 'order.createTransaction')
+    const row   = result.data as { order: any; items: any[]; transaction: any }
+    const items = (row.items ?? []).map(toOrderItem)
 
     return {
-      order:       toOrder(orderRow, items),
-      transaction: toTransaction(txResult.data),
+      order:       toOrder(row.order, items),
+      transaction: toTransaction(row.transaction),
     }
   },
 
@@ -425,6 +400,7 @@ export const orderRepository = {
       retry_count:           number
       last_retry_at:         Date
       confirmed_at:          Date
+      expires_at:            Date
     }>,
   ): Promise<Transaction> {
     const update: Record<string, any> = { updated_at: new Date().toISOString() }
@@ -436,6 +412,7 @@ export const orderRepository = {
     if (payload.retry_count          !== undefined) update['retry_count']           = payload.retry_count
     if (payload.last_retry_at        !== undefined) update['last_retry_at']         = payload.last_retry_at.toISOString()
     if (payload.confirmed_at         !== undefined) update['confirmed_at']          = payload.confirmed_at.toISOString()
+    if (payload.expires_at           !== undefined) update['expires_at']            = payload.expires_at.toISOString()
 
     const result = await (supabase() as any)
       .from('transactions')

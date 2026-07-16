@@ -3,6 +3,8 @@ import { orderRepository } from '../repositories/order.repository'
 import { cartRepository } from '@/modules/cart/repositories/cart.repository'
 import { cartService } from '@/modules/cart/services/cart.service'
 import { artworkRepository } from '@/modules/artwork/repositories/artwork.repository'
+import { shippingAddressRepository } from '@/modules/shipping-address/repositories/shipping-address.repository'
+import { shippingAddressService } from '@/modules/shipping-address/services/shipping-address.service'
 import { redisGetJson, redisSetJson, redisDel, RedisKeys, RedisTTL } from '@/modules/redis/redis.client'
 import { emailService } from '@/modules/email/email.service'
 import { userRepository } from '@/modules/auth/repositories/user.repository'
@@ -30,6 +32,7 @@ import type {
   OrderFilters,
   Transaction,
   CartItemWithArtwork,
+  ShippingAddressSnapshot,
 } from '@/common/types/commerce.types'
 import { config } from '@/config'
 
@@ -46,6 +49,32 @@ const PLATFORM_WALLETS: Record<string, string> = {
 }
 
 const DEFAULT_NETWORK = 'TRON' as const
+
+// Once the buyer submits a tx_hash (status -> CONFIRMING), the original
+// PAYMENT_WINDOW_MINUTES deadline no longer applies — funds may already be
+// in flight on-chain. This window is measured from submission time instead,
+// giving slow-confirming networks room without auto-cancelling a paid order.
+const CONFIRMATION_WINDOW_MINUTES = 60
+
+// ── Error helpers ─────────────────────────────────────────────────────────────
+
+function hasErrorCode(err: unknown): err is { code?: string } {
+  return typeof err === 'object' && err !== null && 'code' in err
+}
+
+async function releaseAllStock(
+  reservations: Array<{ artworkId: string; quantity: number; variantOptionId: string | undefined }>,
+): Promise<void> {
+  for (const r of reservations) {
+    try {
+      await artworkRepository.releaseStock(r.artworkId, r.quantity, r.variantOptionId)
+    } catch (err) {
+      // One failed release must not abandon the rest of the rollback —
+      // log and continue so every other reservation still gets released.
+      console.error(`[order.releaseAllStock] Failed to release stock for artwork ${r.artworkId}`, err)
+    }
+  }
+}
 
 // ── Cache helpers ─────────────────────────────────────────────────────────────
 
@@ -163,8 +192,42 @@ export const orderService = {
     // ── 3. Determine order format mix ─────────────────────────────────────
     const hasPhysical = validatedItems.some(i => i.artwork.artwork_format === 'PHYSICAL')
 
+    if (input.shipping_address_id && input.shipping_address) {
+      throw new ValidationError('Validation failed', {
+        shipping_address: 'Provide either shipping_address_id or shipping_address, not both',
+      })
+    }
+
+    // Resolve the shipping address snapshot to store on the order: either
+    // from the buyer's saved address book, or a one-off inline address.
+    // The order always stores a plain snapshot — the saved-address table
+    // is convenience only, never the order's source of truth (see
+    // shipping_addresses comment in 20240301000000_commerce_schema.sql).
+    let resolvedShippingAddress: ShippingAddressSnapshot | null = null
+
+    if (input.shipping_address_id) {
+      const saved = await shippingAddressRepository.findById(input.shipping_address_id, buyerId)
+      if (!saved) {
+        throw new ValidationError('Validation failed', {
+          shipping_address_id: 'Shipping address not found',
+        })
+      }
+      resolvedShippingAddress = {
+        full_name:      saved.full_name,
+        phone:          saved.phone,
+        address_line_1: saved.address_line_1,
+        address_line_2: saved.address_line_2,
+        city:           saved.city,
+        state:          saved.state,
+        postal_code:    saved.postal_code,
+        country_code:   saved.country_code,
+      }
+    } else if (input.shipping_address) {
+      resolvedShippingAddress = input.shipping_address
+    }
+
     // Physical orders require a shipping address
-    if (hasPhysical && !input.shipping_address) {
+    if (hasPhysical && !resolvedShippingAddress) {
       throw new ValidationError('Validation failed', {
         shipping_address: 'A shipping address is required for orders containing physical artworks',
       })
@@ -203,9 +266,7 @@ export const orderService = {
         )
         if (!reserved) {
           // Roll back all previously reserved stock before throwing
-          for (const r of reservations) {
-            await artworkRepository.releaseStock(r.artworkId, r.quantity, r.variantOptionId)
-          }
+          await releaseAllStock(reservations)
           throw new AppError(
             `Stock reservation failed for "${item.artwork.title}"`,
             422,
@@ -222,9 +283,7 @@ export const orderService = {
 
     if (!walletAddress) {
       // Roll back stock reservations before throwing
-      for (const r of reservations) {
-        await artworkRepository.releaseStock(r.artworkId, r.quantity, r.variantOptionId)
-      }
+      await releaseAllStock(reservations)
       throw new AppError(
         'Payment processing is temporarily unavailable',
         503,
@@ -241,7 +300,7 @@ export const orderService = {
         buyer_id:         buyerId,
         subtotal:         roundedSubtotal,
         currency,
-        shipping_address: input.shipping_address ?? null,
+        shipping_address: resolvedShippingAddress,
         idempotency_key:  input.idempotency_key,
         notes:            input.notes ?? null,
         items:            validatedItems.map(buildOrderItemPayload),
@@ -254,10 +313,33 @@ export const orderService = {
         },
       })
     } catch (err: any) {
-      // Roll back stock on any DB failure
-      for (const r of reservations) {
-        await artworkRepository.releaseStock(r.artworkId, r.quantity, r.variantOptionId)
+      // Stock this request reserved is no longer needed — either another
+      // concurrent request already won (see below) or creation genuinely
+      // failed. Either way it must be released.
+      await releaseAllStock(reservations)
+
+      // A 23505 on orders.idempotency_key means a concurrent request with
+      // the same key already committed its order first. That request
+      // succeeded — this one should return that same order, not a 500.
+      if (hasErrorCode(err) && err.code === '23505') {
+        const winningOrder = await orderRepository.findByIdempotencyKey(input.idempotency_key, buyerId)
+        const winningTx    = winningOrder ? await orderRepository.findTransactionByOrder(winningOrder.id) : undefined
+        if (winningOrder && winningTx) {
+          const result: CheckoutResult = {
+            order: winningOrder,
+            payment_instructions: {
+              transaction_id:           winningTx.id,
+              recipient_wallet_address: winningTx.recipient_wallet_address,
+              amount:                   winningTx.amount,
+              currency:                 winningTx.currency,
+              network:                  winningTx.network,
+              expires_at:               winningTx.expires_at,
+            },
+          }
+          return result
+        }
       }
+
       // Re-throw with context
       throw new AppError(
         'Order creation failed. Please try again.',
@@ -268,6 +350,17 @@ export const orderService = {
 
     // ── 9. Clear purchased cart items ──────────────────────────────────────
     await cartRepository.deleteItems(input.cart_item_ids, buyerId)
+
+    // The order is already created and paid-for-verification at this point —
+    // saving the address for next time is a convenience, not part of the
+    // checkout contract, so a failure here must never fail the response.
+    if (input.save_address && !input.shipping_address_id && resolvedShippingAddress) {
+      shippingAddressService
+        .create(buyerId, { ...resolvedShippingAddress, label: null, is_default: false })
+        .catch(err => {
+          console.error('[order.initiateCheckout] Failed to save shipping address', err)
+        })
+    }
 
     // ── 10. Build result and cache for idempotency ─────────────────────────
     const paymentInstructions: PaymentInstructions = {
@@ -345,11 +438,17 @@ export const orderService = {
       })
     }
 
-    // Move transaction to CONFIRMING — the blockchain verifier job takes it from here
+    // Move transaction to CONFIRMING — the blockchain verifier job takes it from here.
+    // Proof of payment has now been submitted, so the original checkout-window
+    // deadline no longer applies (funds may already be in flight on-chain).
+    // Push expires_at out to a separate, longer confirmation grace window so
+    // a slow-confirming network doesn't get the order auto-cancelled out from
+    // under a buyer who already paid.
     const updatedTx = await orderRepository.updateTransaction(tx.id, {
       status:                'CONFIRMING',
       sender_wallet_address: input.sender_wallet_address,
       tx_hash:               input.tx_hash,
+      expires_at:            new Date(Date.now() + CONFIRMATION_WINDOW_MINUTES * 60 * 1000),
     })
 
     // Enqueue first verification check — fire and forget
