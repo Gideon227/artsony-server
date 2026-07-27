@@ -79,7 +79,7 @@ export async function requireOnboarded(
     if (!user.onboarded) {
       res.status(403).json({
         code: 'ONBOARDING_REQUIRED',
-        redirectTo: '/auth/interests',
+        redirectTo: '/onboarding',
       })
       return
     }

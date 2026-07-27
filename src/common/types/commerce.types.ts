@@ -273,12 +273,31 @@ export type ConfirmPaymentInput = {
 
 // ── Wallet Ledger ─────────────────────────────────────────────────────────────
 
+// SALE     — proceeds from a fulfilled order item
+// WITHDRAWAL — an artist-requested payout (see modules/wallet)
+// REFUND   — money returned to a buyer
+// ADJUSTMENT — manual correction, or a reversal of a rejected/failed withdrawal
+export type WalletLedgerCategory = 'SALE' | 'WITHDRAWAL' | 'REFUND' | 'ADJUSTMENT'
+
+// PENDING_DELIVERY — sale credit for a physical item not yet delivered; not
+//   counted toward available balance.
+// ON_HOLD          — item delivered, inside its post-delivery hold window;
+//   not counted toward available balance until available_at elapses.
+// AVAILABLE        — withdrawable now (digital sales are AVAILABLE
+//   immediately; physical sales become AVAILABLE once available_at passes).
+export type WalletLedgerHoldStatus = 'PENDING_DELIVERY' | 'ON_HOLD' | 'AVAILABLE'
+
 export type WalletLedgerEntry = {
   id: string
   user_id: string
   transaction_id: string | null
   order_id: string | null
+  order_item_id: string | null
+  withdrawal_request_id: string | null
   type: WalletLedgerEntryType
+  category: WalletLedgerCategory
+  hold_status: WalletLedgerHoldStatus
+  available_at: Date | null
   amount: number
   balance_after: number
   description: string

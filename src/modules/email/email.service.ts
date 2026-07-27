@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer'
 import Bull from 'bull'
+import Redis from 'ioredis'
 import { config } from '@/config'
 
 // ─── Transport ────────────────────────────────────────────────────────────────
@@ -15,6 +16,63 @@ const transporter = nodemailer.createTransport({
 })
 
 // ─── Queue (Bull backed by Redis) ─────────────────────────────────────────────
+//
+// Bull opens its own dedicated Redis connections (client/subscriber/bclient)
+// separate from the app's main ioredis client. If those connections can't be
+// established (connection cap reached, network issue, misconfigured host),
+// Bull retries silently in the background by default — and since queue.add()
+// awaits that connection, a slow/broken Redis previously meant this call, and
+// therefore the whole HTTP request that triggered it (e.g. forgot-password),
+// hung forever with no error surfaced anywhere.
+//
+// Fix: bound the connection attempt itself, log failures loudly, and race
+// every add() against a hard timeout so this can never hang indefinitely.
+
+const BULL_CONNECT_TIMEOUT_MS = 5000
+const QUEUE_ADD_TIMEOUT_MS = 5000
+
+function createBullRedisClient(type: 'client' | 'subscriber' | 'bclient'): Redis {
+  const opts = {
+    connectTimeout: BULL_CONNECT_TIMEOUT_MS,
+    retryStrategy: (times: number) => (times > 5 ? null : Math.min(times * 200, 2000)),
+    ...(type !== 'client' && {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+    }),
+  }
+  console.log(`[EmailQueue:${type}] options:`, {
+    maxRetriesPerRequest: opts.maxRetriesPerRequest,
+    enableReadyCheck: opts.enableReadyCheck,
+  })
+  const client = new Redis(config.redis.url, opts)
+  client.on('error', (err) => {
+    console.error(`[EmailQueue:${type}] connection error:`, err.message)
+  })
+  return client
+}
+
+// function createBullRedisClient(type: 'client' | 'subscriber' | 'bclient'): Redis {
+//   const client = new Redis(config.redis.url, {
+//     connectTimeout: BULL_CONNECT_TIMEOUT_MS,
+//     retryStrategy: (times) => (times > 5 ? null : Math.min(times * 200, 2000)),
+//   })
+//   client.on('error', (err) => {
+//     console.error(`[EmailQueue:${type}] connection error:`, err.message)
+//   })
+//   return client
+// }
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`[Timeout] ${label} exceeded ${ms}ms`)), ms)
+  })
+  try {
+    return await Promise.race([promise, timeout])
+  } finally {
+    clearTimeout(timer!)
+  }
+}
 
 type EmailJob = {
   to: string
@@ -24,7 +82,7 @@ type EmailJob = {
 }
 
 const emailQueue = new Bull<EmailJob>(config.queue.emailQueue, {
-  redis: config.redis.url,
+  createClient: (type) => createBullRedisClient(type),
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: 'exponential', delay: 5000 },
@@ -43,9 +101,21 @@ emailQueue.process(async (job) => {
   })
 })
 
+emailQueue.on('error', (err) => {
+  console.error('[EmailQueue] queue-level error:', err.message)
+})
+
 emailQueue.on('failed', (job, err) => {
   console.error(`[EmailQueue] Job ${job.id} failed after ${job.attemptsMade} attempts:`, err.message)
 })
+
+// Every caller goes through this instead of emailQueue.add() directly, so no
+// email send can ever hang the request that triggered it. A timeout here is
+// logged and swallowed as a queueing failure — the caller decides whether
+// that should fail the overall operation (see forgotPassword's try/catch).
+async function enqueue(job: EmailJob): Promise<void> {
+  await withTimeout(emailQueue.add(job), QUEUE_ADD_TIMEOUT_MS, `emailQueue.add(${job.subject})`)
+}
 
 // ─── Templates ────────────────────────────────────────────────────────────────
 
@@ -114,7 +184,7 @@ export const emailService = {
       </p>
     `)
 
-    await emailQueue.add({
+    await enqueue({
       to: input.to,
       subject: 'Reset your Artsony password',
       html,
@@ -131,18 +201,18 @@ export const emailService = {
         Your account is ready. Start by selecting your interests so we can personalise
         your feed with art you'll love.
       </p>
-      <a href="${config.app.frontendUrl}/auth/interests"
+      <a href="${config.app.frontendUrl}/onboarding"
          style="display:inline-block;background:#F25B38;color:#fff;font-weight:600;font-size:15px;
                 padding:14px 32px;border-radius:999px;text-decoration:none;">
         Set Up Your Profile
       </a>
     `)
 
-    await emailQueue.add({
+    await enqueue({
       to: input.to,
       subject: "Welcome to Artsony — let's get started",
       html,
-      text: `Welcome to Artsony! Visit ${config.app.frontendUrl}/auth/interests to set up your profile.`,
+      text: `Welcome to Artsony! Visit ${config.app.frontendUrl}/onboarding to set up your profile.`,
     })
   },
 
@@ -160,7 +230,7 @@ export const emailService = {
       </a>
     `)
 
-    await emailQueue.add({
+    await enqueue({
       to: input.to,
       subject: 'Verify your Artsony email address',
       html,
@@ -229,7 +299,7 @@ export const emailService = {
       </a>
     `)
 
-    await emailQueue.add({
+    await enqueue({
       to:      input.to,
       subject: `Order confirmed — #${shortId}`,
       html,
@@ -257,7 +327,7 @@ export const emailService = {
       </a>
     `)
 
-    await emailQueue.add({
+    await enqueue({
       to:      input.to,
       subject: `Your Artsony order #${shortId} has shipped`,
       html,
@@ -292,7 +362,7 @@ export const emailService = {
       </a>
     `)
 
-    await emailQueue.add({
+    await enqueue({
       to: input.to,
       subject: 'Your Artsony account has been scheduled for deletion',
       html,

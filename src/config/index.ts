@@ -88,7 +88,7 @@ export const config = {
     resetTokenExpiryMinutes: 15,
     resetMaxAttempts: 5,
     rateLimits: {
-      auth: { windowMs: 15 * 60 * 1000, max: 10 },
+      auth: { windowMs: 15 * 60 * 1000, max: 30 },
       api: { windowMs: 60 * 1000, max: 100 },
       passwordReset: { windowMs: 60 * 60 * 1000, max: 3 },
     },
@@ -98,6 +98,15 @@ export const config = {
     emailQueue: 'artsony:queue:email',
     deletionQueue: 'artsony:queue:account-deletion',
     accountDeletionGraceDays: 30,
+  },
+
+  // ── Wallet / payouts ──────────────────────────────────────────────────────
+  // No PSP is wired up yet — withdrawal_requests are fulfilled manually by an
+  // admin. holdPeriodDays is the "clearing" window between a physical item
+  // being marked DELIVERED and its sale proceeds becoming withdrawable.
+  wallet: {
+    holdPeriodDays: parseInt(optional_env('WALLET_HOLD_PERIOD_DAYS', '3'), 10),
+    minWithdrawalAmount: parseFloat(optional_env('WALLET_MIN_WITHDRAWAL_AMOUNT', '20')),
   },
 } as const
 

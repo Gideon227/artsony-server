@@ -3,6 +3,7 @@ import { requireAuth, optionalAuth } from '@/middleware/auth.middleware'
 import { apiRateLimit } from '@/middleware/rate-limit.middleware'
 import {
   handleCreateMoodboard,
+  handleListMoodboards,
   handleUpdateMoodboard,
   handleDeleteMoodboard,
   handleAddArtwork,
@@ -16,6 +17,11 @@ import {
 const router = Router()
 
 router.use(apiRateLimit)
+
+// ── Authenticated: list my own boards ─────────────────────────────────────────
+// Must be registered before GET /:id or Express will try to parse "mine" (or
+// whatever) as a moodboard id.
+router.get('/', requireAuth, handleListMoodboards)
 
 // ── Public / Optional Auth ────────────────────────────────────────────────────
 router.get('/:id', optionalAuth, handleGetMoodboard)

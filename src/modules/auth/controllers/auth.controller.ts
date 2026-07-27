@@ -8,7 +8,7 @@ import type { OAuthProfile } from '@/common/types'
 
 const REFRESH_COOKIE = 'artsony_rt'
 
-// ─── Cookie helpers ───────────────────────────────────────────────────────────
+// Cookie helpers
 
 function setRefreshCookie(res: Response, token: string): void {
   res.cookie(REFRESH_COOKIE, token, {
@@ -254,7 +254,7 @@ export async function handleMe(
   }
 }
 
-// ─── OAuth callbacks ──────────────────────────────────────────────────────────
+// OAuth callbacks 
 
 export async function handleOAuthCallback(
   req: Request,
@@ -269,16 +269,22 @@ export async function handleOAuthCallback(
 
     setRefreshCookie(res, tokens.refreshToken)
 
-    const redirectUrl = user.onboarded
-      ? config.app.frontendUrl
-      : `${config.app.frontendUrl}/auth/interests`
+    // const redirectUrl = user.onboarded
+    //   ? config.app.frontendUrl
+    //   : `${config.app.frontendUrl}/auth/interests`
 
+    // const params = new URLSearchParams({
+    //   access_token: tokens.accessToken,
+    //   is_new: String(isNew),
+    // })
+
+    // res.redirect(`${redirectUrl}?${params.toString()}`)
     const params = new URLSearchParams({
       access_token: tokens.accessToken,
       is_new: String(isNew),
     })
-
-    res.redirect(`${redirectUrl}?${params.toString()}`)
+ 
+    res.redirect(`${config.app.frontendUrl}/oauth/callback?${params.toString()}`)
   } catch (err) {
     next(err)
   }

@@ -191,6 +191,8 @@ export const listArtworksValidation = [
   query('search').optional().isString().trim().isLength({ max: 200 }),
   query('categories').optional(),
   query('creator_id').optional().isUUID(),
+  query('location').optional().isString().trim().isLength({ max: 100 }),
+  query('size_label').optional().isString().trim().isLength({ max: 50 }),
 ]
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -260,6 +262,21 @@ export async function handleGetArtwork(
   }
 }
 
+export async function handleToggleLike(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.auth) throw new UnauthorizedError()
+    const { id } = req.params as { id: string }
+    const result = await artworkService.toggleLike(id, req.auth.sub)
+    res.json({ success: true, data: result })
+  } catch (err) {
+    next(err)
+  }
+}
+
 export async function handleGetArtworkBySlug(
   req: Request,
   res: Response,
@@ -276,6 +293,114 @@ export async function handleGetArtworkBySlug(
     })
 
     res.json({ success: true, data: artwork })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const getFeedValidation = [
+  query('mode').isIn(['for_you', 'following', 'new', 'trending', 'newbies']),
+  query('page').optional().isInt({ min: 1 }).toInt(),
+  query('limit').optional().isInt({ min: 1, max: 50 }).toInt(),
+  query('categories').optional(),
+  query('location').optional().isString().trim().isLength({ max: 100 }),
+  query('size_label').optional().isString().trim().isLength({ max: 50 }),
+]
+
+export async function handleGetFeed(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    assertValid(req)
+
+    const q = req.query as Record<string, any>
+    const mode = q['mode'] as 'for_you' | 'following' | 'new' | 'trending' | 'newbies'
+
+    const filters = {
+      ...(q['page'] ? { page: Number(q['page']) } : {}),
+      ...(q['limit'] ? { limit: Number(q['limit']) } : {}),
+      ...(q['categories']
+        ? { categories: Array.isArray(q['categories']) ? q['categories'] : [q['categories']] }
+        : {}),
+      ...(q['location'] ? { location: q['location'] as string } : {}),
+      ...(q['size_label'] ? { size_label: q['size_label'] as string } : {}),
+    } as ArtworkFilters
+
+    const result = await artworkService.getFeed(mode, filters, req.auth?.sub)
+    res.json({ success: true, ...result })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// Public, unauthenticated — see artworkService.getFeaturedArtworks for the
+// selection algorithm.
+
+export const featuredArtworksValidation = [
+  query('limit').optional().isInt({ min: 1, max: 10 }).withMessage('limit must be 1–10'),
+]
+
+export async function handleGetFeaturedArtworks(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    assertValid(req)
+    const limit = req.query['limit'] ? Number(req.query['limit']) : 5
+    const data = await artworkService.getFeaturedArtworks(limit)
+    res.json({ success: true, data })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const getTopPicksValidation = [
+  query('limit').optional().isInt({ min: 1, max: 20 }).toInt(),
+  query('period').optional().isIn(['all', 'week']),
+  query('listingType').optional().isIn(['MARKETPLACE', 'PORTFOLIO']),
+]
+
+export async function handleGetTopPicks(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    assertValid(req)
+    const limit = (req.query['limit'] as number | undefined) ?? 8
+    const period = (req.query['period'] as 'all' | 'week' | undefined) ?? 'all'
+    const listingType = req.query['listingType'] as 'MARKETPLACE' | 'PORTFOLIO' | undefined
+    const data = await artworkService.getTopPicks(limit, period, listingType)
+    res.json({ success: true, data })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export async function handleGetLocations(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const data = await artworkService.getLocations()
+    res.json({ success: true, data })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export async function handleGetSizeLabels(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const data = await artworkService.getSizeLabels()
+    res.json({ success: true, data })
   } catch (err) {
     next(err)
   }
@@ -312,6 +437,8 @@ export async function handleListArtworks(
               : [q['categories']],
           }
         : {}),
+      ...(q['location'] ? { location: q['location'] as string } : {}),
+      ...(q['size_label'] ? { size_label: q['size_label'] as string } : {}),
     } as ArtworkFilters
 
     const result = await artworkService.listArtworks(

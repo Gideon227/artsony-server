@@ -31,6 +31,7 @@ import {
   ConflictError,
 } from '@/common/errors'
 import { orderRepository } from '../repositories/order.repository'
+import { config } from '@/config'
 
 // ── Redis distributed lock ────────────────────────────────────────────────────
 
@@ -453,6 +454,19 @@ export const physicalOrderService = {
       metadata:   {},
     })
 
+    // Move this item's sale credit out of PENDING_DELIVERY and into a
+    // time-boxed hold — it becomes withdrawable once the hold period
+    // elapses (see get_artist_balance_summary / config.wallet.holdPeriodDays).
+    // Never blocks the delivery confirmation itself.
+    try {
+      await orderRepository.transitionDeliveryHold(
+        physical.order_item_id,
+        config.wallet.holdPeriodDays
+      )
+    } catch (err) {
+      console.error('[physicalOrderService] transitionDeliveryHold failed:', err)
+    }
+
     const orderNumber     = await physicalOrderRepository.getOrderNumber(physical.order_id)
     const [buyerId, sellerId] = await Promise.all([
       getOrderBuyerIdDirect(physical.order_id),
@@ -804,7 +818,10 @@ export const physicalOrderService = {
         user_id:        buyerId,
         transaction_id: null,
         order_id:       physical.order_id,
+        order_item_id:  physical.order_item_id,
         type:           'CREDIT',
+        category:       'REFUND',
+        hold_status:    'AVAILABLE',
         amount:         refundableAmt,
         balance_after:  currentBalance + refundableAmt,
         description:    `Refund for order ${input.order_number ?? physical.order_id} (item cost minus ${(PLATFORM_SERVICE_FEE_RATE * 100).toFixed(0)}% platform fee; shipping non-refundable)`,

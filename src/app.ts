@@ -20,6 +20,11 @@ import { messagingRouter } from './modules/messaging/routes/messaging.router'
 import { notificationRouter } from './modules/messaging/routes/notification.router'
 import { physicalOrderRouter } from './modules/order/routes/physical-order.routes'
 import { shippingAddressRouter } from './modules/shipping-address/routes/shipping-address.routes'
+import { walletRouter } from './modules/wallet/routes/wallet.routes'
+import { reviewRouter } from './modules/review/routes/review.routes'
+import { analyticsRouter } from './modules/analytics/routes/analytics.routes'
+import { followRouter } from './modules/follow/routes/follow.route'
+import { commentRouter } from './modules/comments/routes/comment.route'
 
 // Middleware & Config
 import { errorHandler, notFoundHandler } from './middleware/error.middleware'
@@ -101,6 +106,11 @@ export function createApp() {
   app.use('/api/notifications', notificationRouter)
   app.use('/api/physical-orders', physicalOrderRouter)
   app.use('/api/shipping-addresses', shippingAddressRouter)
+  app.use('/api/wallet', walletRouter)
+  app.use('/api/reviews', reviewRouter)
+  app.use('/api/analytics', analyticsRouter)
+  app.use('/api/follows', followRouter)
+  app.use('/api/comments', commentRouter)
 
   // Note: In any specific router that needs onboarding protection, import and use:
   // router.use(requireAuth, requireOnboarded)

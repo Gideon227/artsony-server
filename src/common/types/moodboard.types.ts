@@ -16,3 +16,11 @@ export type CreateMoodboardInput = {
 export type UpdateMoodboardInput = {
   title: string
 }
+
+export type MoodboardSummary = {
+  id: string
+  title: string
+  artwork_count: number
+  created_at: Date
+  updated_at: Date
+}

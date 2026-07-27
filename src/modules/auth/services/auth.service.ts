@@ -267,13 +267,20 @@ export async function forgotPassword(input: {
     email: input.email,
   })
 
-  const resetUrl = `${config.app.frontendUrl}/auth/reset-password?token=${raw}&email=${encodeURIComponent(input.email)}`
+  const resetUrl = `${config.app.frontendUrl}/reset-password?token=${raw}&email=${encodeURIComponent(input.email)}`
 
-  await emailService.sendPasswordResetEmail({
-    to: input.email,
-    resetUrl,
-    expiryMinutes: config.security.resetTokenExpiryMinutes,
-  })
+  try {
+    await emailService.sendPasswordResetEmail({
+      to: input.email,
+      resetUrl,
+      expiryMinutes: config.security.resetTokenExpiryMinutes,
+    })
+  } catch (err) {
+    // The reset token is already created and valid — a queueing hiccup here
+    // shouldn't fail (or hang) the request, and staying silent here also
+    // preserves the same response shape whether or not the account exists.
+    console.error('[forgotPassword] Failed to enqueue reset email:', (err as Error).message)
+  }
 
   auditRepository.log(
     buildAudit('AUTH_PASSWORD_RESET_REQUEST', user['id'], input.ctx, { email: input.email })

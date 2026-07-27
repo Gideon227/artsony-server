@@ -1,6 +1,6 @@
 // ── Enums (mirror SQL enums exactly) ─────────────────────────────────────────
 
-import { User } from "."
+import { User, UserRole } from "."
 
 export type ListingType = 'MARKETPLACE' | 'PORTFOLIO'
 export type ArtworkFormat = 'DIGITAL' | 'PHYSICAL'
@@ -43,17 +43,17 @@ export type PhysicalDetails = {
 
 export type VariantOption = {
   id: string
-  label: string             // e.g. "Small", "Red", "Oak"
-  price_modifier: number             // delta from base price; can be negative
+  label: string              // e.g. "Small", "Red", "Oak"
+  price_modifier: number     // delta from base price; can be negative
   sku: string | null
-  stock: number | null      // null = unlimited
-  is_available:   boolean
+  stock: number | null       // null = unlimited
+  is_available: boolean
 }
 
 export type Variant = {
   id: string
   type: 'SIZE' | 'COLOR' | 'MATERIAL' | 'FRAMING' | 'EDITION'
-  name: string                    // e.g. "Size", "Frame Style"
+  name: string               // e.g. "Size", "Frame Style"
   options: VariantOption[]
 }
 
@@ -77,7 +77,7 @@ export type Artwork = {
   allow_moodboard_save: boolean
   allow_comments: boolean
   allow_likes: boolean
-  show_engagement_stats:boolean
+  show_engagement_stats: boolean
   status: ArtworkStatus
   is_flagged: boolean
   moderation_status: ModerationStatus
@@ -112,7 +112,7 @@ export type CreateArtworkInput = {
   tools_used: string[]
   assets: Omit<ArtworkAsset, 'id'>[]
   visibility: ArtworkVisibility
-  allow_moodboard_save:  boolean
+  allow_moodboard_save: boolean
   allow_comments: boolean
   allow_likes: boolean
   show_engagement_stats: boolean
@@ -120,7 +120,7 @@ export type CreateArtworkInput = {
   // marketplace-conditional
   price?: number
   currency?: string
-  max_purchase_quantity?:number
+  max_purchase_quantity?: number
   // physical-conditional
   physical_details?: PhysicalDetails
   // variants-conditional
@@ -135,14 +135,17 @@ export type UpdateArtworkInput = Partial<Omit<
 
 export type ArtworkFilters = {
   creator_id?: string
+  creator_ids?: string[]
   listing_type?: ListingType
-  artwork_format?:ArtworkFormat
+  artwork_format?: ArtworkFormat
   status?: ArtworkStatus
   visibility?: ArtworkVisibility
   categories?: string[]
   min_price?: number
   max_price?: number
   search?: string
+  location?: string   
+  size_label?: string 
   page?: number
   limit?: number
   sort_by?: 'created_at' | 'like_count' | 'view_count' | 'price'
@@ -157,6 +160,30 @@ export type PaginatedArtworks = {
   total_pages: number
   has_next: boolean
   has_prev: boolean
+}
+
+// ── Featured Artwork Types ────────────────────────────────────────────────────
+
+export type FeaturedArtworkCreator = {
+  id: string
+  username: string | null
+  display_name: string | null
+  avatar_url: string | null
+  bio: string | null
+  role: UserRole
+}
+
+export type FeaturedArtwork = {
+  id: string
+  slug: string
+  title: string
+  description: string
+  thumbnail_url: string | null
+  view_count: number
+  like_count: number
+  purchase_count: number
+  created_at: Date
+  creator: FeaturedArtworkCreator
 }
 
 // ── SSRF-safe external link config ────────────────────────────────────────────

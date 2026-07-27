@@ -47,6 +47,19 @@ export async function handleCreateMoodboard(req: Request, res: Response, next: N
   }
 }
 
+export async function handleListMoodboards(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.auth) throw new UnauthorizedError()
+
+    const userId = req.auth.sub as string
+    const moodboards = await moodboardService.listMoodboards(userId)
+
+    res.json({ success: true, data: moodboards })
+  } catch (err) {
+    next(err)
+  }
+}
+
 export async function handleUpdateMoodboard(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     assertValid(req)

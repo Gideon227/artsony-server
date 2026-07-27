@@ -11,6 +11,8 @@ import type {
   WalletNetwork,
   WalletLedgerEntry,
   WalletLedgerEntryType,
+  WalletLedgerCategory,
+  WalletLedgerHoldStatus,
   PaginatedResult,
   OrderFilters,
 } from '@/common/types/commerce.types'
@@ -33,6 +35,25 @@ function toOrderItem(row: any): OrderItem {
     line_total:            Number(row['line_total']),
     variant_snapshot:      (row['variant_snapshot'] ?? null) as OrderVariantSnapshot | null,
     created_at:            new Date(row['created_at']),
+  }
+}
+
+function toWalletLedgerEntry(row: any): WalletLedgerEntry {
+  return {
+    id:                     row['id'],
+    user_id:                row['user_id'],
+    transaction_id:         row['transaction_id'] ?? null,
+    order_id:               row['order_id'] ?? null,
+    order_item_id:          row['order_item_id'] ?? null,
+    withdrawal_request_id:  row['withdrawal_request_id'] ?? null,
+    type:                   row['type'] as WalletLedgerEntryType,
+    category:               row['category'] as WalletLedgerCategory,
+    hold_status:            row['hold_status'] as WalletLedgerHoldStatus,
+    available_at:           row['available_at'] ? new Date(row['available_at']) : null,
+    amount:                 Number(row['amount']),
+    balance_after:          Number(row['balance_after']),
+    description:            row['description'],
+    created_at:             new Date(row['created_at']),
   }
 }
 
@@ -463,30 +484,63 @@ export const orderRepository = {
     user_id:        string
     transaction_id: string | null
     order_id:       string | null
+    order_item_id?: string | null
     type:           WalletLedgerEntryType
+    // category/hold_status default to the pre-existing behaviour (an
+    // immediately-available SALE credit) so call sites that don't care
+    // about hold semantics — e.g. buyer refunds — don't need to change.
+    category?:      WalletLedgerCategory
+    hold_status?:   WalletLedgerHoldStatus
+    available_at?:  Date | null
     amount:         number
     balance_after:  number
     description:    string
   }): Promise<WalletLedgerEntry> {
+    const payload = {
+      user_id:                input.user_id,
+      transaction_id:         input.transaction_id,
+      order_id:               input.order_id,
+      order_item_id:          input.order_item_id ?? null,
+      type:                   input.type,
+      category:               input.category ?? 'SALE',
+      hold_status:            input.hold_status ?? 'AVAILABLE',
+      available_at:           (input.hold_status ?? 'AVAILABLE') === 'AVAILABLE'
+        ? (input.available_at ?? new Date()).toISOString()
+        : (input.available_at?.toISOString() ?? null),
+      amount:                 input.amount,
+      balance_after:          input.balance_after,
+      description:            input.description,
+    }
+
     const result = await (supabase() as any)
       .from('wallet_ledger')
-      .insert(input)
+      .insert(payload)
       .select('*')
       .single()
 
     assertNoError(result, 'order.appendWalletLedgerEntry')
-    const row = result.data
-    return {
-      id:             row['id'],
-      user_id:        row['user_id'],
-      transaction_id: row['transaction_id'] ?? null,
-      order_id:       row['order_id'] ?? null,
-      type:           row['type'] as WalletLedgerEntryType,
-      amount:         Number(row['amount']),
-      balance_after:  Number(row['balance_after']),
-      description:    row['description'],
-      created_at:     new Date(row['created_at']),
+    return toWalletLedgerEntry(result.data)
+  },
+
+  // ── TransitionDeliveryHold ──────────────────────────────────────────────────
+  // Moves the PENDING_DELIVERY sale credit(s) for an order item into ON_HOLD
+  // once it's been marked delivered, starting the hold-period clock. No-op
+  // (returns []) for digital items, which never had a PENDING_DELIVERY row.
+
+  async transitionDeliveryHold(
+    orderItemId: string,
+    holdDays: number
+  ): Promise<WalletLedgerEntry[]> {
+    const result = await (supabase() as any).rpc('transition_delivery_hold', {
+      p_order_item_id: orderItemId,
+      p_hold_days:      holdDays,
+    })
+
+    if (result.error) {
+      throw new Error(`[Supabase:order.transitionDeliveryHold] ${result.error.message}`)
     }
+
+    return ((result.data ?? []) as any[]).map(toWalletLedgerEntry)
   },
 
   // ── GetWalletBalance ───────────────────────────────────────────────────────

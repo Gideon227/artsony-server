@@ -522,24 +522,37 @@ export const orderService = {
       }).catch(() => {})
     }
 
-    // Credit wallet ledger for each unique seller
-    const sellerTotals = new Map<string, number>()
+    // Credit wallet ledger — one entry PER ORDER ITEM (not aggregated per
+    // seller) so each item's proceeds can be independently tracked through
+    // its own hold lifecycle:
+    //   • DIGITAL items  → AVAILABLE immediately (delivery is instant).
+    //   • PHYSICAL items → PENDING_DELIVERY; physicalOrderService moves
+    //     these to ON_HOLD (with an available_at N days out) once the item
+    //     is actually marked delivered — see adminMarkDelivered().
+    // Running balance_after is tracked locally per seller across this loop
+    // to avoid re-querying the DB between inserts for the same seller.
+    const runningBalance = new Map<string, number>()
     for (const item of order.items) {
-      const current = sellerTotals.get(item.seller_id) ?? 0
-      sellerTotals.set(item.seller_id, current + item.line_total)
-    }
+      if (!runningBalance.has(item.seller_id)) {
+        runningBalance.set(item.seller_id, await orderRepository.getSellerBalance(item.seller_id))
+      }
+      const current = runningBalance.get(item.seller_id)!
+      const next = current + item.line_total
 
-    for (const [sellerId, amount] of sellerTotals) {
-      const currentBalance = await orderRepository.getSellerBalance(sellerId)
       await orderRepository.appendWalletLedgerEntry({
-        user_id:        sellerId,
+        user_id:        item.seller_id,
         transaction_id: tx.id,
         order_id:       orderId,
+        order_item_id:  item.id,
         type:           'CREDIT',
-        amount,
-        balance_after:  currentBalance + amount,
-        description:    `Sale from order #${orderId.slice(0, 8)}`,
+        category:       'SALE',
+        hold_status:    item.artwork_format === 'PHYSICAL' ? 'PENDING_DELIVERY' : 'AVAILABLE',
+        amount:         item.line_total,
+        balance_after:  next,
+        description:    `Sale of "${item.artwork_title}" from order #${orderId.slice(0, 8)}`,
       })
+
+      runningBalance.set(item.seller_id, next)
     }
 
     // Queue buyer confirmation email (fire and forget — never blocks order fulfillment)

@@ -9,6 +9,7 @@ import type {
   Variant,
   CreateArtworkInput,
   UpdateArtworkInput,
+  FeaturedArtwork,
 } from '@/common/types/artwork.types'
 
 // ── Row → Domain mapper ───────────────────────────────────────────────────────
@@ -79,7 +80,56 @@ const CREATOR_EMBED = `
   )
 `
 
+const FEATURED_EMBED = `
+  id, slug, title, view_count, like_count, purchase_count, created_at, assets,
+  creator:users!artworks_creator_id_fkey (
+    id,
+    role,
+    username,
+    profile:profiles (
+      display_name,
+      avatar_url,
+      bio
+    )
+  )
+`
+
+function pickThumbnail(assets: any): string | null {
+  const list = parseJsonField<ArtworkAsset[]>(assets, [])
+  if (!list.length) return null
+  const primary = [...list].sort((a, b) => a.ordering_index - b.ordering_index)[0]
+  return primary?.thumbnail_url ?? primary?.optimized_url ?? primary?.original_url ?? null
+}
+
+function toFeaturedArtwork(row: any): FeaturedArtwork {
+  const creatorRow = row['creator'] ?? {}
+  const profile = creatorRow['profile'] ?? {}
+  return {
+    ['id']: row['id'],
+    ['slug']: row['slug'],
+    ['title']: row['title'],
+    ['description']: row['description'],
+    ['thumbnail_url']: pickThumbnail(row['assets']),
+    ['view_count']: row['view_count'] ?? 0,
+    ['like_count']: row['like_count'] ?? 0,
+    ['purchase_count']: row['purchase_count'] ?? 0,
+    ['created_at']: new Date(row['created_at']),
+    ['creator']: {
+      ['id']: creatorRow['id'],
+      ['username']: creatorRow['username'] ?? null,
+      ['display_name']: profile['display_name'] ?? null,
+      ['avatar_url']: profile['avatar_url'] ?? null,
+      ['bio']: profile['bio'] ?? null,
+      ['role']: creatorRow['role'],
+    },
+  }
+}
+
 // ── Repository ────────────────────────────────────────────────────────────────
+
+function emptyResult(page: number, limit: number): PaginatedArtworks {
+  return { data: [], total: 0, page, limit, total_pages: 0, has_next: false, has_prev: page > 1 }
+}
 
 export const artworkRepository = {
 
@@ -358,6 +408,34 @@ export const artworkRepository = {
     }
   },
 
+  // ── ToggleLike ─────────────────────────────────────────────────────────────
+
+  async toggleLike(artworkId: string, userId: string): Promise<{ liked: boolean; like_count: number }> {
+    const result = await (supabase() as any)
+      .rpc('toggle_artwork_like', { p_artwork_id: artworkId, p_user_id: userId })
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.toggleLike] ${result.error.message}`)
+    }
+
+    const row = (result.data ?? [])[0] ?? { liked: false, like_count: 0 }
+    return { liked: Boolean(row['liked']), like_count: Number(row['like_count']) }
+  },
+
+  async hasLiked(artworkId: string, userId: string): Promise<boolean> {
+    const result = await (supabase() as any)
+      .from('artwork_likes')
+      .select('id')
+      .eq('artwork_id', artworkId)
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.hasLiked] ${result.error.message}`)
+    }
+    return Boolean(result.data)
+  },
+
   // ── List ───────────────────────────────────────────────────────────────────
 
   async list(filters: ArtworkFilters): Promise<PaginatedArtworks> {
@@ -366,12 +444,38 @@ export const artworkRepository = {
     const from  = (page - 1) * limit
     const to    = from + limit - 1
 
+    // Resolve location/size filters into concrete id lists first — both are
+    // fundamentally "which artworks/creators match" lookups that can't be
+    // expressed as a simple column comparison (location lives one hop away
+    // on profiles; size lives inside a JSONB array), so they're resolved
+    // up front and then applied the same way creator_ids already is.
+    let resolvedCreatorIds = filters.creator_ids
+    if (filters.location?.trim()) {
+      const locationCreatorIds = await this.getCreatorIdsByLocation(filters.location.trim())
+      if (locationCreatorIds.length === 0) {
+        return emptyResult(page, limit)
+      }
+      resolvedCreatorIds = resolvedCreatorIds?.length
+        ? resolvedCreatorIds.filter((id) => locationCreatorIds.includes(id))
+        : locationCreatorIds
+    }
+
+    let sizeArtworkIds: string[] | undefined
+    if (filters.size_label?.trim()) {
+      sizeArtworkIds = await this.getArtworkIdsBySize(filters.size_label.trim())
+      if (sizeArtworkIds.length === 0) {
+        return emptyResult(page, limit)
+      }
+    }
+
     let query = (supabase() as any)
       .from('artworks')
       .select(CREATOR_EMBED, { count: 'exact' })
       .is('deleted_at', null)
 
     if (filters.creator_id)    query = query.eq('creator_id', filters.creator_id)
+    if (resolvedCreatorIds?.length) query = query.in('creator_id', resolvedCreatorIds)
+    if (sizeArtworkIds?.length)     query = query.in('id', sizeArtworkIds)
     if (filters.listing_type)  query = query.eq('listing_type', filters.listing_type)
     if (filters.artwork_format)query = query.eq('artwork_format', filters.artwork_format)
     if (filters.status)        query = query.eq('status', filters.status)
@@ -380,7 +484,12 @@ export const artworkRepository = {
     if (filters.max_price !== undefined) query = query.lte('price', filters.max_price)
 
     if (filters.categories?.length) {
-      query = query.contains('categories', filters.categories)
+      // .overlaps (not .contains) — a multi-select category filter means
+      // "has ANY of these categories", not "has ALL of these categories".
+      // .contains would require every selected category to be present on
+      // the same artwork simultaneously, which is far too restrictive for
+      // what a category filter chip UI actually means.
+      query = query.overlaps('categories', filters.categories)
     }
 
     if (filters.search?.trim()) {
@@ -416,7 +525,253 @@ export const artworkRepository = {
     }
   },
 
-  // ── Flag ───────────────────────────────────────────────────────────────────
+  // ── Category affinity for "For You" ──────────────────────────────────────────
+  // No recommendation engine exists — this is a deliberately simple v1
+  // heuristic: look at categories on artworks the user has liked, commented
+  // on, or rated 5 stars after a purchase, rank by frequency, return the top
+  // N. Three lightweight queries + in-memory aggregation, not a single
+  // mega-join — easier to reason about and each piece stays independently
+  // cacheable/fast on its own indexes.
+
+  async getEngagedCategories(userId: string, limit = 5): Promise<string[]> {
+    const [likedRes, commentedRes, ratedRes] = await Promise.all([
+      (supabase() as any).from('artwork_likes').select('artwork_id').eq('user_id', userId),
+      (supabase() as any).from('comments').select('artwork_id').eq('user_id', userId).is('deleted_at', null),
+      (supabase() as any).from('order_reviews').select('artwork_id').eq('buyer_id', userId).eq('rating', 5),
+    ])
+
+    if (likedRes.error)     throw new Error(`[Supabase:artwork.getEngagedCategories:likes] ${likedRes.error.message}`)
+    if (commentedRes.error) throw new Error(`[Supabase:artwork.getEngagedCategories:comments] ${commentedRes.error.message}`)
+    if (ratedRes.error)     throw new Error(`[Supabase:artwork.getEngagedCategories:reviews] ${ratedRes.error.message}`)
+
+    const artworkIds = Array.from(new Set([
+      ...(likedRes.data ?? []).map((r: any) => r['artwork_id']),
+      ...(commentedRes.data ?? []).map((r: any) => r['artwork_id']),
+      ...(ratedRes.data ?? []).map((r: any) => r['artwork_id']),
+    ]))
+
+    if (artworkIds.length === 0) return []
+
+    const categoriesRes = await (supabase() as any)
+      .from('artworks')
+      .select('categories')
+      .in('id', artworkIds)
+
+    if (categoriesRes.error) {
+      throw new Error(`[Supabase:artwork.getEngagedCategories:categories] ${categoriesRes.error.message}`)
+    }
+
+    const frequency = new Map<string, number>()
+    for (const row of categoriesRes.data ?? []) {
+      for (const category of row['categories'] ?? []) {
+        frequency.set(category, (frequency.get(category) ?? 0) + 1)
+      }
+    }
+
+    return Array.from(frequency.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([category]) => category)
+  },
+
+  // ── Recently-joined artists for "Newbies" ────────────────────────────────────
+
+  async getRecentArtistIds(sinceDays = 30, limit = 200): Promise<string[]> {
+    const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString()
+
+    const result = await (supabase() as any)
+      .from('users')
+      .select('id')
+      .eq('role', 'ARTIST')
+      .gte('created_at', since)
+      .limit(limit)
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.getRecentArtistIds] ${result.error.message}`)
+    }
+    return (result.data ?? []).map((r: any) => r['id'])
+  },
+
+  // ── Location filter ("profiles.location" substring match) ───────────────────
+  // profiles.location is free text (not an ISO code), so this is a substring
+  // match rather than exact — "Lagos, Nigeria" should match a "Nigeria"
+  // filter. Two-step (resolve creator ids, then .in() on the main query),
+  // same pattern as getRecentArtistIds/getEngagedCategories above.
+
+  async getCreatorIdsByLocation(locationQuery: string): Promise<string[]> {
+    const result = await (supabase() as any)
+      .from('profiles')
+      .select('user_id')
+      .ilike('location', `%${locationQuery}%`)
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.getCreatorIdsByLocation] ${result.error.message}`)
+    }
+    return (result.data ?? []).map((r: any) => r['user_id'])
+  },
+
+  // ── Size variant ("Medium") filter ───────────────────────────────────────────
+  // variants is a JSONB array with no relational table backing it, so both
+  // of these go through Postgres functions (see
+  // 20241101000000_top_picks_and_size_filter.sql) rather than trying to
+  // express JSONB-array matching through the JS query builder.
+
+  async getDistinctSizeLabels(): Promise<{ label: string; artwork_count: number }[]> {
+    const result = await (supabase() as any).rpc('get_distinct_size_labels')
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.getDistinctSizeLabels] ${result.error.message}`)
+    }
+    return (result.data ?? []).map((r: any) => ({
+      label: r['label'],
+      artwork_count: Number(r['artwork_count']),
+    }))
+  },
+
+  async getArtworkIdsBySize(sizeLabel: string): Promise<string[]> {
+    const result = await (supabase() as any).rpc('get_artwork_ids_by_size', { p_size_label: sizeLabel })
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.getArtworkIdsBySize] ${result.error.message}`)
+    }
+    return (result.data ?? []).map((r: any) => r['id'])
+  },
+
+  async findManyByIdsOrdered(ids: string[]): Promise<Artwork[]> {
+    if (ids.length === 0) return []
+
+    const result = await (supabase() as any)
+      .from('artworks')
+      .select(CREATOR_EMBED)
+      .in('id', ids)
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.findManyByIdsOrdered] ${result.error.message}`)
+    }
+
+    const byId = new Map((result.data ?? []).map((row: any) => [row.id, row]))
+    return ids.map((id) => byId.get(id)).filter(Boolean).map(toArtwork)
+  },
+
+  async getDistinctLocations(): Promise<{ label: string; artwork_count: number }[]> {
+    const result = await (supabase() as any).rpc('get_distinct_artist_locations')
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.getDistinctLocations] ${result.error.message}`)
+    }
+    return (result.data ?? []).map((r: any) => ({
+      label: r['label'],
+      artwork_count: Number(r['artwork_count']),
+    }))
+  },
+
+  // ── Top Picks ─────────────────────────────────────────────────────────────────
+  // Real ranking algorithm (decayed hot-score, one per creator for
+  // diversity) — see get_top_picks() in the same migration. Not manual
+  // curation; there's no is_featured flag on the canonical artworks table.
+
+  async getTopPicks(limit = 8, listingType?: 'MARKETPLACE' | 'PORTFOLIO'): Promise<Artwork[]> {
+    const result = await (supabase() as any).rpc('get_top_picks', {
+      p_limit: limit,
+      p_listing_type: listingType ?? null,
+    })
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.getTopPicks] ${result.error.message}`)
+    }
+    // The RPC returns SETOF artworks (bare rows, no creator embed — Postgres
+    // functions can't express a PostgREST-style embed). Re-fetch through the
+    // normal embedded query so callers get creator/profile data consistently
+    // with every other artwork response.
+    const ids = (result.data ?? []).map((r: any) => r['id'])
+    if (ids.length === 0) return []
+
+    const embedResult = await (supabase() as any)
+      .from('artworks')
+      .select(CREATOR_EMBED)
+      .in('id', ids)
+
+    if (embedResult.error) {
+      throw new Error(`[Supabase:artwork.getTopPicks:embed] ${embedResult.error.message}`)
+    }
+
+    // Preserve the RPC's ranking order — the embed re-fetch above doesn't
+    // guarantee row order matches the .in() list.
+    const byId = new Map((embedResult.data ?? []).map((row: any) => [row.id, row]))
+    return ids.map((id: string) => toArtwork(byId.get(id))).filter(Boolean)
+  },
+
+  // ── Featured artworks (homepage hero) ─────────────────────────────────────────
+  // All-time proven performers: real purchases, or a meaningful like count —
+  // guards against a fresh artwork with like_count=0 looking "well performing"
+  // on an otherwise-empty site.
+
+  async findTopPerformers(limit: number): Promise<FeaturedArtwork[]> {
+    const result = await (supabase() as any)
+      .from('artworks')
+      .select(FEATURED_EMBED)
+      .eq('status', 'PUBLISHED')
+      .eq('visibility', 'PUBLIC')
+      .is('deleted_at', null)
+      .or('purchase_count.gt.0,like_count.gte.5')
+      .order('purchase_count', { ascending: false })
+      .order('like_count', { ascending: false })
+      .limit(limit)
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.findTopPerformers] ${result.error.message}`)
+    }
+    return (result.data ?? []).map(toFeaturedArtwork)
+  },
+
+  // Recently-published artworks with at least some engagement — the raw
+  // candidate pool the service scores/ranks by view-weighted velocity.
+  async findRecentCandidates(
+    sinceIso: string,
+    limit: number,
+    listingType?: 'MARKETPLACE' | 'PORTFOLIO',
+  ): Promise<FeaturedArtwork[]> {
+    let query = (supabase() as any)
+      .from('artworks')
+      .select(FEATURED_EMBED)
+      .eq('status', 'PUBLISHED')
+      .eq('visibility', 'PUBLIC')
+      .is('deleted_at', null)
+      .gte('created_at', sinceIso)
+      .gt('view_count', 0)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+
+    if (listingType) query = query.eq('listing_type', listingType)
+
+    const result = await query
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.findRecentCandidates] ${result.error.message}`)
+    }
+    return (result.data ?? []).map(toFeaturedArtwork)
+  },
+
+  // Last-resort backfill when the site doesn't yet have enough qualifying
+  // proven/trending artworks to fill every hero slot with real data.
+  async findFallback(excludeIds: string[], limit: number): Promise<FeaturedArtwork[]> {
+    let query = (supabase() as any)
+      .from('artworks')
+      .select(FEATURED_EMBED)
+      .eq('status', 'PUBLISHED')
+      .eq('visibility', 'PUBLIC')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(limit + excludeIds.length)
+
+    if (excludeIds.length) query = query.not('id', 'in', `(${excludeIds.join(',')})`)
+
+    const result = await query
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.findFallback] ${result.error.message}`)
+    }
+    return (result.data ?? []).map(toFeaturedArtwork).slice(0, limit)
+  },
 
   async flag(
     id: string,

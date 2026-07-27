@@ -1,5 +1,5 @@
-import { supabase } from '@/config/database' // Adjust to your db client path
-import type { Moodboard } from '@/common/types/moodboard.types'
+import { supabase } from '@/config/database'
+import type { Moodboard, MoodboardSummary } from '@/common/types/moodboard.types'
 
 export const moodboardRepository = {
   async create(userId: string, title: string): Promise<Moodboard> {
@@ -14,6 +14,37 @@ export const moodboardRepository = {
 
     if (error) throw error
     return data as Moodboard
+  },
+
+  async findByUserId(userId: string): Promise<MoodboardSummary[]> {
+    const db = supabase() as any
+
+    const { data, error } = await db
+      .from('moodboards')
+      .select('id, title, created_at, updated_at, moodboard_items(count)')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+
+    if (error) throw error
+
+    // PostgREST's `relation(count)` embed normally returns
+    // `moodboard_items: [{ count: N }]`. Handling both that and a bare
+    // object defensively since this is unverified against your actual DB —
+    // log a warning once if neither shape matches so it's easy to spot.
+    return (data ?? []).map((row: any) => {
+      const embed = row.moodboard_items
+      const artworkCount = Array.isArray(embed)
+        ? (embed[0]?.count ?? 0)
+        : (embed?.count ?? 0)
+
+      return {
+        id: row.id,
+        title: row.title,
+        artwork_count: artworkCount,
+        created_at: new Date(row.created_at),
+        updated_at: new Date(row.updated_at),
+      }
+    })
   },
 
   async update(id: string, title: string): Promise<Moodboard> {

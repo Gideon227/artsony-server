@@ -7,16 +7,25 @@ import {
   handleGetArtworkBySlug,
   handleGetPurchasableArtwork,
   handleListArtworks,
+  handleGetFeed,
+  getFeedValidation,
+  handleGetTopPicks,
+  getTopPicksValidation,
+  handleGetSizeLabels,
+  handleGetLocations,
   handleUpdateArtwork,
   handlePublishArtwork,
   handleArchiveArtwork,
   handleDeleteArtwork,
   handleFlagArtwork,
+  handleToggleLike,
   createArtworkValidation,
   updateArtworkValidation,
   flagArtworkValidation,
   listArtworksValidation,
   purchasableArtworkValidation,
+  featuredArtworksValidation,
+  handleGetFeaturedArtworks,
 } from '../controllers/artwork.controller'
 
 const router = Router()
@@ -29,6 +38,11 @@ router.use(apiRateLimit)
 // optionalAuth: attaches req.auth if a valid token is present but never
 // throws — guests can browse public artworks without a token.
 
+router.get('/feed', getFeedValidation, optionalAuth, handleGetFeed)
+router.get('/top-picks', getTopPicksValidation, handleGetTopPicks)
+router.get('/featured', featuredArtworksValidation, handleGetFeaturedArtworks)
+router.get('/size-labels', handleGetSizeLabels)
+router.get('/locations', handleGetLocations)
 router.get('/', listArtworksValidation, optionalAuth, handleListArtworks)
 router.get('/by-slug/:slug', optionalAuth, handleGetArtworkBySlug)
 
@@ -69,6 +83,12 @@ router.post(
   '/:id/archive',
   requireAuth,
   handleArchiveArtwork,
+)
+
+router.post(
+  '/:id/like',
+  requireAuth,
+  handleToggleLike,
 )
 
 router.delete(

@@ -60,7 +60,7 @@ router.get(
 router.get(
   '/oauth/google/callback',
   validateStateMiddleware,
-  passport.authenticate('google', { session: false, failureRedirect: `${config.app.frontendUrl}/auth/login?error=oauth_failed` }),
+  passport.authenticate('google', { session: false, failureRedirect: `${config.app.frontendUrl}/login?error=oauth_failed` }),
   handleOAuthCallback
 )
 
@@ -82,7 +82,7 @@ router.get(
 router.get(
   '/oauth/facebook/callback',
   validateStateMiddleware,
-  passport.authenticate('facebook', { session: false, failureRedirect: `${config.app.frontendUrl}/auth/login?error=oauth_failed` }),
+  passport.authenticate('facebook', { session: false, failureRedirect: `${config.app.frontendUrl}/login?error=oauth_failed` }),
   handleOAuthCallback
 )
 
@@ -115,14 +115,14 @@ async function validateStateMiddleware(
   const queryState = req.query['state'] as string | undefined
 
   if (!cookieState || !queryState || cookieState !== queryState) {
-    res.redirect(`${config.app.frontendUrl}/auth/login?error=csrf_failed`)
+    res.redirect(`${config.app.frontendUrl}/login?error=csrf_failed`)
     return
   }
 
   const { redisGet, redisDel } = await import('../redis/redis.client.js')
   const stored = await redisGet(RedisKeys.oauthState(queryState))
   if (!stored) {
-    res.redirect(`${config.app.frontendUrl}/auth/login?error=state_expired`)
+    res.redirect(`${config.app.frontendUrl}/login?error=state_expired`)
     return
   }
 
