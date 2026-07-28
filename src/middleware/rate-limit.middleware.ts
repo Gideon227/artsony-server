@@ -5,12 +5,13 @@ import { config } from '../config'
 import { TooManyRequestsError } from '../common/errors'
 import type { Request, Response } from 'express'
 
-// Custom Redis store for rate-limit — persists across restarts
 class RedisStore {
   private prefix: string
+  private windowSeconds: number
 
-  constructor(prefix: string) {
+  constructor(prefix: string, windowMs: number) {
     this.prefix = prefix
+    this.windowSeconds = Math.ceil(windowMs / 1000)
   }
 
   async increment(key: string): Promise<{ totalHits: number; resetTime: Date }> {
@@ -25,12 +26,12 @@ class RedisStore {
     const ttl = (results?.[1]?.[1] as number) ?? -1
 
     if (hits === 1) {
-      await redis.expire(redisKey, Math.ceil(config.security.rateLimits.auth.windowMs / 1000))
+      await redis.expire(redisKey, this.windowSeconds)
     }
 
     const resetTime = ttl > 0
       ? new Date(Date.now() + ttl * 1000)
-      : new Date(Date.now() + config.security.rateLimits.auth.windowMs)
+      : new Date(Date.now() + this.windowSeconds * 1000)
 
     return { totalHits: hits, resetTime }
   }
@@ -48,19 +49,46 @@ const handler = (_req: Request, _res: Response): void => {
   throw new TooManyRequestsError()
 }
 
-// ─── Auth routes: 10 requests per 15 minutes ─────────────────────────────────
+// ─── Register: separate bucket, keyed by IP ──────────────────────────────────
+// FIX: previously shared the same 'authRateLimit' instance (and therefore the
+// same Redis counter) as /login and /reset-password. A few signup retries
+// could exhaust the quota before the user ever reached the login form.
 
-export const authRateLimit = rateLimit({
+export const registerRateLimit = rateLimit({
   windowMs: config.security.rateLimits.auth.windowMs,
   max: config.security.rateLimits.auth.max,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.ip ?? 'unknown',
   handler,
-  store: new RedisStore('rl:auth:') as never,
+  store: new RedisStore('rl:register:', config.security.rateLimits.auth.windowMs) as never,
 })
 
-// ─── Password reset: 3 requests per hour ─────────────────────────────────────
+// ─── Login: its own bucket, separate from register/reset ─────────────────────
+
+export const loginRateLimit = rateLimit({
+  windowMs: config.security.rateLimits.auth.windowMs,
+  max: config.security.rateLimits.auth.max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip ?? 'unknown',
+  handler,
+  store: new RedisStore('rl:login:', config.security.rateLimits.auth.windowMs) as never,
+})
+
+// ─── Password reset (auth-side, e.g. /reset-password): its own bucket ────────
+
+export const resetPasswordRateLimit = rateLimit({
+  windowMs: config.security.rateLimits.auth.windowMs,
+  max: config.security.rateLimits.auth.max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip ?? 'unknown',
+  handler,
+  store: new RedisStore('rl:reset-pw:', config.security.rateLimits.auth.windowMs) as never,
+})
+
+// ─── Forgot-password request: 3 requests per hour ─────────────────────────────
 
 export const resetRateLimit = rateLimit({
   windowMs: config.security.rateLimits.passwordReset.windowMs,
@@ -69,7 +97,7 @@ export const resetRateLimit = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => `${req.ip}:${(req.body as { email?: string }).email ?? ''}`,
   handler,
-  store: new RedisStore('rl:reset:') as never,
+  store: new RedisStore('rl:reset:', config.security.rateLimits.passwordReset.windowMs) as never,
 })
 
 // ─── General API: 100 req/min ─────────────────────────────────────────────────
@@ -81,7 +109,7 @@ export const apiRateLimit = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => req.auth?.sub ?? req.ip ?? 'unknown',
   handler,
-  store: new RedisStore('rl:api:') as never,
+  store: new RedisStore('rl:api:', config.security.rateLimits.api.windowMs) as never,
 })
 
 // ─── Slow-down: progressively delay after 5 requests ─────────────────────────

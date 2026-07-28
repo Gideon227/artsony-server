@@ -58,8 +58,8 @@ export async function submitRegistration(
   auditRepository.log({
     userId,
     action: 'SELLER_REGISTRATION_SUBMITTED',
-    ipAddress: ctx.ipAddress ?? undefined,
-    userAgent: ctx.userAgent ?? undefined,
+    ...(ctx.ipAddress && { ipAddress: ctx.ipAddress }),
+    ...(ctx.userAgent && { userAgent: ctx.userAgent }),
     metadata: { registrationId: registration.id, resubmission: Boolean(existing) },
   })
 
@@ -159,8 +159,8 @@ async function changeStatus(
   auditRepository.log({
     userId: adminId,
     action,
-    ipAddress: ctx.ipAddress ?? undefined,
-    userAgent: ctx.userAgent ?? undefined,
+    ...(ctx.ipAddress && { ipAddress: ctx.ipAddress }),
+    ...(ctx.userAgent && { userAgent: ctx.userAgent }),
     metadata: {
       registrationId: id,
       targetUserId: updated.user_id,

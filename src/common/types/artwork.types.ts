@@ -80,6 +80,7 @@ export type Artwork = {
   show_engagement_stats: boolean
   status: ArtworkStatus
   is_flagged: boolean
+  is_saved?: boolean
   moderation_status: ModerationStatus
   reviewed_by: string | null
   review_notes: string | null

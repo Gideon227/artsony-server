@@ -172,15 +172,24 @@ export async function getArtworkById(
   id: string,
   requesterId?: string,
 ): Promise<Artwork> {
-  const cached = await redisGetJson<Artwork>(RedisKeys.artworkById(id))
-  if (cached) return cached
+  // const cached = await redisGetJson<Artwork>(RedisKeys.artworkById(id))
+  // if (cached) return cached
 
-  const artwork = await artworkRepository.findById(id)
+  // Cache only the unauthenticated shape — is_saved is per-user and must
+  // never leak across requesters through a shared cache key.
+  if (!requesterId) {
+    const cached = await redisGetJson<Artwork>(RedisKeys.artworkById(id))
+    if (cached) return cached
+  }
+
+  const artwork = await artworkRepository.findById(id, requesterId)
   if (!artwork) throw new NotFoundError('Artwork')
 
   enforceVisibilityRead(artwork, requesterId)
 
-  void redisSetJson(RedisKeys.artworkById(id), artwork, RedisTTL.artworkSingle)
+  if (!requesterId) {
+    void redisSetJson(RedisKeys.artworkById(id), artwork, RedisTTL.artworkSingle)
+  }  
   return artwork
 }
 
@@ -732,4 +741,35 @@ export async function getPurchasableArtwork(id: string): Promise<Artwork> {
 
   void redisSetJson(RedisKeys.artworkById(id), artwork, RedisTTL.artworkSingle)
   return artwork
+}
+
+export async function toggleSave(
+  artworkId: string,
+  userId: string,
+): Promise<{ saved: boolean; save_count: number }> {
+  const artwork = await artworkRepository.findById(artworkId)
+  if (!artwork) throw new NotFoundError('Artwork')
+  if (artwork.status !== 'PUBLISHED') {
+    throw new ForbiddenError('This artwork is not published yet')
+  }
+  if (!artwork.allow_moodboard_save) {
+    throw new ForbiddenError('The creator has disabled saving on this artwork')
+  }
+
+  const result = await artworkRepository.toggleSave(artworkId, userId)
+  void redisDel(RedisKeys.artworkById(artworkId))
+  if (artwork.slug) void redisDel(RedisKeys.artworkBySlug(artwork.slug))
+  return result
+}
+
+export async function reportArtwork(
+  artworkId: string,
+  reporterId: string,
+  reason: string,
+  notes?: string,
+): Promise<void> {
+  const artwork = await artworkRepository.findById(artworkId)
+  if (!artwork) throw new NotFoundError('Artwork')
+
+  await artworkRepository.createReport(artworkId, reporterId, reason, notes)
 }

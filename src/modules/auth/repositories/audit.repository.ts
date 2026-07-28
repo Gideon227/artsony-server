@@ -51,8 +51,9 @@ export const auditRepository = {
       return []
     }
 
-    return (result.data ?? []).map((row: AuditLog) => ({
-      ...(row as AuditLog),
+    return (result.data ?? []).map((row) => ({
+      ...(row as any),
+      ip_address: (row.ip_address as string | null) ?? null,
       created_at: new Date(row.created_at),
     }))
   },

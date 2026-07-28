@@ -21,7 +21,7 @@ function parseJsonField<T>(value: any, fallback: T): T {
   return value as T
 }
 
-function toArtwork(row: any): Artwork {
+function toArtwork(row: any, isSaved?: boolean): Artwork {
   return {
     ['id']: row['id'],
     ['listing_type']: row['listing_type'],
@@ -43,6 +43,7 @@ function toArtwork(row: any): Artwork {
     ['show_engagement_stats']: row['show_engagement_stats'],
     ['status']: row['status'],
     ['is_flagged']: row['is_flagged'],
+    ...(isSaved !== undefined ? { is_saved: isSaved } : {}),
     ['moderation_status']: row['moderation_status'],
     ['reviewed_by']: row['reviewed_by'] ?? null,
     ['review_notes']: row['review_notes'] ?? null,
@@ -193,7 +194,7 @@ export const artworkRepository = {
 
   // ── FindById ───────────────────────────────────────────────────────────────
 
-  async findById(id: string): Promise<Artwork | undefined> {
+  async findById(id: string, requesterId?: string): Promise<Artwork | undefined> {
     const result = await (supabase() as any)
       .from('artworks')
       .select(CREATOR_EMBED)
@@ -203,13 +204,14 @@ export const artworkRepository = {
 
     if (result.error?.code === 'PGRST116') return undefined
     assertNoError(result, 'artwork.findById')
-    return toArtwork(result.data)
+    const isSaved = requesterId ? await this.findSaveStatus(id, requesterId) : undefined
+    return toArtwork(result.data, isSaved)
   },
 
 
-  // ── FindBySlug ─────────────────────────────────────────────────────────────
+  // ── FindBySlug 
 
-  async findBySlug(slug: string): Promise<Artwork | undefined> {
+  async findBySlug(slug: string, requesterId?: string): Promise<Artwork | undefined> {
     const result = await (supabase() as any)
       .from('artworks')
       .select(CREATOR_EMBED)
@@ -219,7 +221,8 @@ export const artworkRepository = {
 
     if (result.error?.code === 'PGRST116') return undefined
     assertNoError(result, 'artwork.findBySlug')
-    return toArtwork(result.data)
+    const isSaved = requesterId ? await this.findSaveStatus(result.data.id, requesterId) : undefined
+    return toArtwork(result.data, isSaved)
   },
 
   // ── Update (SECURED WITH DEEP MERGE) ───────────────────────────────────────
@@ -515,7 +518,7 @@ export const artworkRepository = {
     const total_pages = Math.ceil(total / limit)
 
     return {
-      data:        (result.data ?? []).map(toArtwork),
+      data: (result.data ?? []).map(toArtwork),
       total,
       page,
       limit,
@@ -650,7 +653,7 @@ export const artworkRepository = {
     }
 
     const byId = new Map((result.data ?? []).map((row: any) => [row.id, row]))
-    return ids.map((id) => byId.get(id)).filter(Boolean).map(toArtwork)
+    return ids.map((id) => byId.get(id)).filter(Boolean).map((row) => toArtwork(row))
   },
 
   async getDistinctLocations(): Promise<{ label: string; artwork_count: number }[]> {
@@ -897,6 +900,55 @@ export const artworkRepository = {
 
     if (result.error) {
       throw new Error(`[Supabase:artwork.releaseStock] ${result.error.message}`)
+    }
+  },
+
+  async findSaveStatus(artworkId: string, userId: string): Promise<boolean> {
+    const result = await (supabase() as any)
+      .from('saves')
+      .select('id')
+      .eq('artwork_id', artworkId)
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.findSaveStatus] ${result.error.message}`)
+    }
+    return Boolean(result.data)
+  },
+
+  async toggleSave(artworkId: string, userId: string): Promise<{ saved: boolean; save_count: number }> {
+    const result = await (supabase() as any)
+      .rpc('toggle_artwork_save', { p_artwork_id: artworkId, p_user_id: userId })
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.toggleSave] ${result.error.message}`)
+    }
+
+    const row = (result.data ?? [])[0] ?? { saved: false, save_count: 0 }
+    return { saved: Boolean(row['saved']), save_count: Number(row['save_count']) }
+  },
+
+  async createReport(
+    artworkId: string,
+    reporterId: string,
+    reason: string,
+    notes?: string,
+  ): Promise<void> {
+    const result = await (supabase() as any)
+      .from('artwork_reports')
+      .upsert(
+        {
+          ['artwork_id']: artworkId,
+          ['reporter_id']: reporterId,
+          ['reason']: reason,
+          ['notes']: notes ?? null,
+        },
+        { onConflict: 'artwork_id,reporter_id', ignoreDuplicates: true },
+      )
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.createReport] ${result.error.message}`)
     }
   },
 }

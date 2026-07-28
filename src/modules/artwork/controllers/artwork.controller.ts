@@ -604,3 +604,45 @@ export async function handleGetPurchasableArtwork(
     next(err)
   }
 }
+
+export async function handleToggleSave(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.auth) throw new UnauthorizedError()
+    const { id } = req.params as { id: string }
+    const result = await artworkService.toggleSave(id, req.auth.sub)
+    res.json({ success: true, data: result })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const reportArtworkValidation = [
+  param('id').isUUID().withMessage('Invalid artwork id'),
+  body('reason')
+    .isIn(['COPYRIGHT', 'INAPPROPRIATE', 'SPAM', 'MISLEADING', 'HARASSMENT', 'OTHER'])
+    .withMessage('Invalid report reason'),
+  body('notes').optional().isString().trim().isLength({ max: 1000 }),
+]
+
+export async function handleReportArtwork(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    assertValid(req)
+    if (!req.auth) throw new UnauthorizedError()
+
+    const { id } = req.params as { id: string }
+    const { reason, notes } = req.body as { reason: string; notes?: string }
+
+    await artworkService.reportArtwork(id, req.auth.sub, reason, notes)
+    res.status(201).json({ success: true, message: 'Report submitted' })
+  } catch (err) {
+    next(err)
+  }
+}

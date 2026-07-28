@@ -9,7 +9,10 @@ import {
 } from '../auth/controllers/auth.controller'
 import { requireAuth } from '@/middleware/auth.middleware'
 import {
-  authRateLimit, resetRateLimit, loginSlowDown,
+  resetRateLimit, loginSlowDown,
+  resetPasswordRateLimit,
+  registerRateLimit,
+  loginRateLimit,
 } from '@/middleware/rate-limit.middleware'
 import { generateOAuthState } from '../auth/services/token.service'
 import { redisSet, RedisKeys } from '../redis/redis.client'
@@ -20,8 +23,8 @@ const router = Router()
 
 // ─── Local auth ───────────────────────────────────────────────────────────────
 
-router.post('/register', authRateLimit, registerValidation, handleRegister)
-router.post('/login', authRateLimit, loginSlowDown, loginValidation, handleLogin)
+router.post('/register', registerRateLimit, registerValidation, handleRegister)
+router.post('/login', loginRateLimit, loginSlowDown, loginValidation, handleLogin)
 router.post('/logout', requireAuth, handleLogout)
 router.post('/refresh', handleRefresh)
 router.get('/me', requireAuth, handleMe)
@@ -36,12 +39,7 @@ router.post(
   handleForgotPassword
 )
 
-router.post(
-  '/reset-password',
-  authRateLimit,
-  resetPasswordValidation,
-  handleResetPassword
-)
+router.post('/reset-password', resetPasswordRateLimit, resetPasswordValidation, handleResetPassword)
 
 // ─── Google OAuth ─────────────────────────────────────────────────────────────
 // Setup: https://console.developers.google.com
