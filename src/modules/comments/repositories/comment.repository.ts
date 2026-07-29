@@ -44,12 +44,12 @@ function toComment(row: any): CommentWithAuthor {
             updated_at: new Date(row['updated_at']),
             deleted_at: row['deleted_at'] ? new Date(row['deleted_at']) : null,
             author: {
-            id: row.author?.id,
-            username: row.author?.username,
-            display_name: profile.display_name ?? null,
-            avatar_url: profile.avatar_url ?? null,
-        },
-    }
+                id: row.author?.id,
+                username: row.author?.username,
+                display_name: profile.display_name ?? null,
+                avatar_url: profile.avatar_url ?? null,
+            },
+        }
     }
 
     export const commentRepository = {

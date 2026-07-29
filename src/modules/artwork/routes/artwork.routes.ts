@@ -26,6 +26,9 @@ import {
   purchasableArtworkValidation,
   featuredArtworksValidation,
   handleGetFeaturedArtworks,
+  handleToggleSave,
+  handleReportArtwork,
+  reportArtworkValidation,
 } from '../controllers/artwork.controller'
 
 const router = Router()
@@ -89,6 +92,19 @@ router.post(
   '/:id/like',
   requireAuth,
   handleToggleLike,
+)
+
+router.post(
+  '/:id/save',
+  requireAuth,
+  handleToggleSave,
+)
+
+router.post(
+  '/:id/report',
+  requireAuth,
+  reportArtworkValidation,
+  handleReportArtwork,
 )
 
 router.delete(

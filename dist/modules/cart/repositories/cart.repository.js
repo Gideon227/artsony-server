@@ -1,0 +1,268 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.cartRepository = void 0;
+const database_1 = require("../../../config/database");
+// ── Row → Domain mappers ──────────────────────────────────────────────────────
+function toCartItem(row) {
+    return {
+        id: row['id'],
+        user_id: row['user_id'],
+        artwork_id: row['artwork_id'],
+        quantity: row['quantity'],
+        price_at_add: Number(row['price_at_add']),
+        currency_at_add: row['currency_at_add'],
+        variant_snapshot: (row['variant_snapshot'] ?? null),
+        added_at: new Date(row['added_at']),
+    };
+}
+// Enriched: joins artwork + seller profile. Supabase select syntax handles
+// the join — we map both the cart item fields and the nested artwork shape.
+// function toCartItemWithArtwork(row: any): CartItemWithArtwork {
+//   const artwork = row['artwork']
+//   return {
+//     ...toCartItem(row),
+//     artwork: {
+//       id:                   artwork['id'],
+//       title:                artwork['title'],
+//       slug:                 artwork['slug'],
+//       thumbnail_url:        artwork['thumbnail_url'] ?? null,
+//       artwork_format:       artwork['artwork_format'],
+//       listing_type:         artwork['listing_type'],
+//       status:               artwork['status'],
+//       moderation_status:    artwork['moderation_status'],
+//       price:                artwork['price'] !== null ? Number(artwork['price']) : null,
+//       currency:             artwork['currency'],
+//       max_purchase_quantity:artwork['max_purchase_quantity'] ?? null,
+//       has_variants:         artwork['has_variants'],
+//       seller_id:            artwork['creator_id'],
+//       seller_name:          artwork['creator']?.['name'] ?? '',
+//       seller_avatar_url:    artwork['creator']?.['avatar_url'] ?? null,
+//     },
+//     // Staleness flags are computed in the service layer, not the repository.
+//     // We set safe defaults here so TypeScript is satisfied.
+//     is_price_changed:       false,
+//     is_unavailable:         false,
+//     is_stock_insufficient:  false,
+//   }
+// }
+function toCartItemWithArtwork(row) {
+    const artwork = row['artwork'];
+    // Safely extract the nested profile
+    const profile = artwork['creator']?.['profile'];
+    return {
+        ...toCartItem(row),
+        artwork: {
+            id: artwork['id'],
+            title: artwork['title'],
+            slug: artwork['slug'],
+            thumbnail_url: artwork['thumbnail_url'] ?? null,
+            artwork_format: artwork['artwork_format'],
+            listing_type: artwork['listing_type'],
+            status: artwork['status'],
+            moderation_status: artwork['moderation_status'],
+            price: artwork['price'] !== null ? Number(artwork['price']) : null,
+            currency: artwork['currency'],
+            max_purchase_quantity: artwork['max_purchase_quantity'] ?? null,
+            has_variants: artwork['has_variants'],
+            // Update these three lines to navigate into the profile object
+            seller_id: artwork['creator']?.['id'] ?? null,
+            seller_name: profile?.['display_name'] ?? artwork['creator']?.['username'] ?? '',
+            seller_avatar_url: profile?.['avatar_url'] ?? null,
+        },
+        is_price_changed: false,
+        is_unavailable: false,
+        is_stock_insufficient: false,
+    };
+}
+// ── Repository ────────────────────────────────────────────────────────────────
+exports.cartRepository = {
+    // ── FindByUser ─────────────────────────────────────────────────────────────
+    // Returns all cart items for the user joined with the artwork and its
+    // creator profile. Ordered by most recently added first.
+    // async findByUser(userId: string): Promise<CartItemWithArtwork[]> {
+    //   const result = await (supabase() as any)
+    //     .from('cart_items')
+    //     .select(`
+    //       *,
+    //       artwork:artworks (
+    //         *,
+    //         creator:users!artworks_creator_id_fkey (
+    //           id,
+    //           username,
+    //           role,
+    //           profile:profiles (
+    //             display_name,
+    //             avatar_url,
+    //             followers_count,
+    //             following_count,
+    //             artworks_count,
+    //             sales_count
+    //           )
+    //         )
+    //       )
+    //     `)
+    //     .eq('user_id', userId)
+    //     .order('added_at', { ascending: false })
+    //   assertNoErrorMany(result, 'cart.findByUser')
+    //   return (result.data ?? []).map(toCartItemWithArtwork)
+    // },
+    async findByUser(userId) {
+        const result = await (0, database_1.supabase)()
+            .from('cart_items')
+            .select(`
+        *,
+        artwork:artworks!cart_items_artwork_id_fkey (
+          *,
+          creator:users!artworks_creator_id_fkey (
+            id,
+            username,
+            role,
+            profile:profiles!profiles_user_id_fkey (
+              display_name,
+              avatar_url,
+              followers_count,
+              following_count,
+              artworks_count,
+              sales_count
+            )
+          )
+        )
+      `)
+            .eq('user_id', userId)
+            .order('added_at', { ascending: false });
+        (0, database_1.assertNoErrorMany)(result, 'cart.findByUser');
+        return (result.data ?? []).map(toCartItemWithArtwork);
+    },
+    // ── FindItemById ───────────────────────────────────────────────────────────
+    async findItemById(itemId, userId) {
+        const result = await (0, database_1.supabase)()
+            .from('cart_items')
+            .select('*')
+            .eq('id', itemId)
+            .eq('user_id', userId)
+            .single();
+        if (result.error?.code === 'PGRST116')
+            return undefined;
+        (0, database_1.assertNoError)(result, 'cart.findItemById');
+        return toCartItem(result.data);
+    },
+    // ── CountByUser ────────────────────────────────────────────────────────────
+    async countByUser(userId) {
+        const result = await (0, database_1.supabase)()
+            .from('cart_items')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_id', userId);
+        if (result.error)
+            return 0;
+        return result.count ?? 0;
+    },
+    // ── FindExistingLine ───────────────────────────────────────────────────────
+    // Finds a specific (user, artwork, variant_option_id) combination.
+    // Used to detect duplicates before inserting — digital artworks can only
+    // have one row, physical artworks with the same variant also consolidate.
+    async findExistingLine(userId, artworkId, variantOptionId) {
+        let query = (0, database_1.supabase)()
+            .from('cart_items')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('artwork_id', artworkId);
+        // The unique constraint in the DB uses (variant_snapshot->>'option_id').
+        // We mirror that logic here for the pre-insert check.
+        if (variantOptionId) {
+            query = query.eq("variant_snapshot->>'option_id'", variantOptionId);
+        }
+        else {
+            query = query.is('variant_snapshot', null);
+        }
+        const result = await query.maybeSingle();
+        if (result.error?.code === 'PGRST116')
+            return undefined;
+        if (result.error)
+            return undefined;
+        if (!result.data)
+            return undefined;
+        return toCartItem(result.data);
+    },
+    // ── Upsert ─────────────────────────────────────────────────────────────────
+    // Inserts a new cart row or updates quantity on conflict.
+    // The DB unique constraint on (user_id, artwork_id, option_id) backs this up.
+    async upsert(payload) {
+        const result = await (0, database_1.supabase)()
+            .from('cart_items')
+            .upsert({
+            user_id: payload.user_id,
+            artwork_id: payload.artwork_id,
+            quantity: payload.quantity,
+            price_at_add: payload.price_at_add,
+            currency_at_add: payload.currency_at_add,
+            variant_snapshot: payload.variant_snapshot,
+        }, {
+            onConflict: 'user_id,artwork_id',
+            ignoreDuplicates: false,
+        })
+            .select('*')
+            .single();
+        (0, database_1.assertNoError)(result, 'cart.upsert');
+        return toCartItem(result.data);
+    },
+    // ── Insert ─────────────────────────────────────────────────────────────────
+    async insert(payload) {
+        const result = await (0, database_1.supabase)()
+            .from('cart_items')
+            .insert(payload)
+            .select('*')
+            .single();
+        (0, database_1.assertNoError)(result, 'cart.insert');
+        return toCartItem(result.data);
+    },
+    // ── UpdateQuantity ─────────────────────────────────────────────────────────
+    async updateQuantity(itemId, userId, quantity) {
+        const result = await (0, database_1.supabase)()
+            .from('cart_items')
+            .update({ quantity })
+            .eq('id', itemId)
+            .eq('user_id', userId)
+            .select('*')
+            .single();
+        (0, database_1.assertNoError)(result, 'cart.updateQuantity');
+        return toCartItem(result.data);
+    },
+    // ── DeleteItem ─────────────────────────────────────────────────────────────
+    async deleteItem(itemId, userId) {
+        const result = await (0, database_1.supabase)()
+            .from('cart_items')
+            .delete()
+            .eq('id', itemId)
+            .eq('user_id', userId);
+        if (result.error) {
+            throw new Error(`[Supabase:cart.deleteItem] ${result.error.message}`);
+        }
+    },
+    // ── DeleteItems ────────────────────────────────────────────────────────────
+    // Removes a specific set of items by ID for a given user.
+    // Called after a successful checkout to clear purchased items only.
+    async deleteItems(itemIds, userId) {
+        if (!itemIds.length)
+            return;
+        const result = await (0, database_1.supabase)()
+            .from('cart_items')
+            .delete()
+            .in('id', itemIds)
+            .eq('user_id', userId);
+        if (result.error) {
+            throw new Error(`[Supabase:cart.deleteItems] ${result.error.message}`);
+        }
+    },
+    // ── ClearCart ──────────────────────────────────────────────────────────────
+    // Removes all items for a user — called after full checkout.
+    async clearCart(userId) {
+        const result = await (0, database_1.supabase)()
+            .from('cart_items')
+            .delete()
+            .eq('user_id', userId);
+        if (result.error) {
+            throw new Error(`[Supabase:cart.clearCart] ${result.error.message}`);
+        }
+    },
+};
+//# sourceMappingURL=cart.repository.js.map
