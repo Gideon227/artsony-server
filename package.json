@@ -65,6 +65,7 @@
     "supabase": "^1.226.4",
     "supertest": "^7.0.0",
     "ts-jest": "^29.1.4",
+    "tsc-alias": "^1.9.1",
     "tsx": "^4.7.3",
     "typescript": "^5.4.5"
   }
