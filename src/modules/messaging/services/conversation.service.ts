@@ -2,6 +2,9 @@ import { conversationRepository } from '../repositories/conversation.repository'
 import { messageRepository } from '../repositories/message.repository'
 import { getRedis } from '@/modules/redis/redis.client'
 import { connectionManager } from '@/modules/ws/connection-manager'
+import { userRepository } from '@/modules/auth/repositories/user.repository'
+import { blockRepository } from '@/modules/block/repositories/block.repository'
+import { isInteractionAllowed } from '@/common/utils/privacy.util'
 import {
   ForbiddenError,
   NotFoundError,
@@ -33,6 +36,19 @@ export const conversationService = {
     if (input.initiator_id === input.recipient_id) {
       throw new ValidationError('Cannot start a conversation with yourself')
     }
+
+    const [blocked, settings] = await Promise.all([
+      blockRepository.isBlockedEitherDirection(input.initiator_id, input.recipient_id),
+      userRepository.getPrivacySettings(input.recipient_id),
+    ])
+    if (blocked) throw new ForbiddenError('You cannot message this user')
+
+    const allowed = await isInteractionAllowed(
+      settings.who_can_message,
+      input.initiator_id,
+      input.recipient_id,
+    )
+    if (!allowed) throw new ForbiddenError('This user limits who can message them')
 
     // The RPC is atomic — safe for concurrent requests
     const convId = await conversationRepository.getOrCreateDirect(

@@ -5,6 +5,7 @@ import { sessionRepository } from '../repositories/session.repository'
 import { resetTokenRepository } from '../repositories/reset-token.repository'
 import { auditRepository } from '../repositories/audit.repository'
 import { emailService } from '../../email/email.service'
+import { scheduleAccountPurge } from '../jobs/account-purge.job'
 import {
   hashPassword,
   verifyPassword,
@@ -115,6 +116,16 @@ export async function login(input: {
 
   if (user['status'] === 'DELETED') {
     throw new UnauthorizedError('Account not found')
+  }
+
+  // Deactivation is self-service and immediately reversible — unlike
+  // SUSPENDED/DELETED, a successful login (meaning the password check
+  // above already passed) reactivates the account automatically rather
+  // than blocking sign-in.
+  if (user['status'] === 'DEACTIVATED') {
+    await userRepository.update(user['id'], { status: 'ACTIVE' })
+    user['status'] = 'ACTIVE'
+    auditRepository.log(buildAudit('AUTH_ACCOUNT_REACTIVATED', user['id'], input.ctx))
   }
 
   if (user['locked_until'] && user['locked_until'] > new Date()) {
@@ -403,6 +414,10 @@ export async function deleteAccount(input: {
     Date.now() + config.queue.accountDeletionGraceDays * 24 * 60 * 60 * 1000
   )
 
+  // Actually enforce the grace period promised below — previously this was
+  // never scheduled anywhere, so accounts stayed soft-deleted indefinitely.
+  await scheduleAccountPurge(user['id'])
+
   await emailService.sendAccountDeletionConfirmation({
     to: user['email'],
     displayName: user['email'],
@@ -412,6 +427,73 @@ export async function deleteAccount(input: {
   auditRepository.log(
     buildAudit('AUTH_ACCOUNT_DELETE_INITIATED', user['id'], input.ctx, { scheduledAt })
   )
+}
+
+// ─── Change Password (while signed in) ─────────────────────────────────────
+// Distinct from resetPassword — that flow is for a locked-out user via an
+// emailed token; this is for a signed-in user who knows their current
+// password. Revokes all sessions and bumps token_version on success,
+// including the session making this request — the caller must expect to
+// need a fresh login afterward, same security posture as resetPassword.
+
+export async function changePassword(input: {
+  userId: string
+  currentPassword: string
+  newPassword: string
+  ctx: AuthContext
+}): Promise<void> {
+  const user = await userRepository.findById(input.userId)
+  if (!user) throw new NotFoundError('User')
+
+  if (user['provider'] !== 'local' || !user['password_hash']) {
+    throw new ValidationError('Validation failed', {
+      password: 'This account signs in via a social provider and has no password to change',
+    })
+  }
+
+  const valid = await verifyPassword(user['password_hash'], input.currentPassword)
+  if (!valid) throw new UnauthorizedError('Current password is incorrect')
+
+  validatePasswordComplexity(input.newPassword)
+  const newHash = await hashPassword(input.newPassword)
+
+  await Promise.all([
+    userRepository.update(user['id'], { password_hash: newHash }),
+    userRepository.incrementTokenVersion(user['id']),
+    sessionRepository.revokeAllForUser(user['id']),
+  ])
+
+  auditRepository.log(buildAudit('AUTH_PASSWORD_CHANGED', user['id'], input.ctx))
+}
+
+// ─── Deactivate Account ─────────────────────────────────────────────────────
+// Self-service and immediately reversible by logging back in (see the
+// DEACTIVATED branch in login() above) — distinct from deleteAccount,
+// which starts an irreversible-after-the-grace-period purge.
+
+export async function deactivateAccount(input: {
+  userId: string
+  password?: string
+  ctx: AuthContext
+}): Promise<void> {
+  const user = await userRepository.findById(input.userId)
+  if (!user) throw new NotFoundError('User')
+
+  if (user['provider'] === 'local') {
+    if (!input.password) throw new ValidationError('Password confirmation required')
+    if (!user['password_hash']) throw new UnauthorizedError()
+
+    const valid = await verifyPassword(user['password_hash'], input.password)
+    if (!valid) throw new UnauthorizedError('Incorrect password')
+  }
+
+  await Promise.all([
+    userRepository.update(user['id'], { status: 'DEACTIVATED' }),
+    sessionRepository.revokeAllForUser(user['id']),
+    userRepository.incrementTokenVersion(user['id']),
+  ])
+
+  auditRepository.log(buildAudit('AUTH_ACCOUNT_DEACTIVATED', user['id'], input.ctx))
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────

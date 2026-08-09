@@ -24,7 +24,10 @@ import { walletRouter } from './modules/wallet/routes/wallet.routes'
 import { reviewRouter } from './modules/review/routes/review.routes'
 import { analyticsRouter } from './modules/analytics/routes/analytics.routes'
 import { followRouter } from './modules/follow/routes/follow.route'
+import { blockRouter } from './modules/block/routes/block.routes'
 import { commentRouter } from './modules/comments/routes/comment.route'
+import { moodboardRouter } from './modules/moodboards/routes/moodboard.routes'
+
 
 // Middleware & Config
 import { errorHandler, notFoundHandler } from './middleware/error.middleware'
@@ -110,7 +113,9 @@ export function createApp() {
   app.use('/api/reviews', reviewRouter)
   app.use('/api/analytics', analyticsRouter)
   app.use('/api/follows', followRouter)
+  app.use('/api/blocks', blockRouter)
   app.use('/api/comments', commentRouter)
+  app.use('/api/moodboards', moodboardRouter)
 
   // Note: In any specific router that needs onboarding protection, import and use:
   // router.use(requireAuth, requireOnboarded)

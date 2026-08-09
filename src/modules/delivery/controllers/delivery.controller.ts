@@ -43,6 +43,12 @@ export const tokenParamValidation = [
     .withMessage('Invalid token format'),
 ]
 
+export const orderItemParamValidation = [
+  param('orderItemId')
+    .isUUID()
+    .withMessage('Invalid order item id'),
+]
+
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 // GET /api/delivery/:token
@@ -79,6 +85,28 @@ export async function handleGetMyDownloads(
 
     const tokens = await deliveryService.getMyDownloads(req.auth.sub)
     res.json({ success: true, data: tokens })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// GET /api/delivery/order-items/:orderItemId
+// In-app download entry point for the "My Downloads" page. Ownership is
+// verified against the authenticated session — no raw token required, so
+// this works even if the delivery email was never seen by the buyer.
+export async function handleGetDownloadForOrderItem(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    assertValid(req)
+    if (!req.auth) throw new UnauthorizedError()
+
+    const { orderItemId } = req.params as { orderItemId: string }
+    const result = await deliveryService.getDownloadForOrderItem(orderItemId, req.auth.sub)
+
+    res.json({ success: true, data: result })
   } catch (err) {
     next(err)
   }

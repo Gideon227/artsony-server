@@ -1,10 +1,14 @@
 import { cartRepository } from '../repositories/cart.repository'
 import { artworkRepository } from '@/modules/artwork/repositories/artwork.repository'
 import { enforceIsPurchasable } from '@/modules/artwork/services/artwork.service'
+import { userRepository } from '@/modules/auth/repositories/user.repository'
+import { blockRepository } from '@/modules/block/repositories/block.repository'
+import { isInteractionAllowed } from '@/common/utils/privacy.util'
 import { redisGetJson, redisSetJson, redisDel, RedisKeys, RedisTTL } from '@/modules/redis/redis.client'
 import {
   NotFoundError,
   AppError,
+  ForbiddenError,
   ValidationError,
 } from '@/common/errors'
 import type {
@@ -173,6 +177,20 @@ export const cartService = {
       )
     }
     enforceIsPurchasable(artwork)
+
+    // 1b. Purchase-privacy + block enforcement — the actual point-of-sale
+    // gate is the checkout validation below (validateForCheckout), but
+    // checking here too gives immediate feedback instead of letting a
+    // blocked/restricted item sit in the cart until checkout fails.
+    if (artwork.creator_id !== userId) {
+      const [blocked, settings] = await Promise.all([
+        blockRepository.isBlockedEitherDirection(userId, artwork.creator_id),
+        userRepository.getPrivacySettings(artwork.creator_id),
+      ])
+      if (blocked) throw new ForbiddenError('You cannot purchase this artwork')
+      const allowed = await isInteractionAllowed(settings.who_can_purchase, userId, artwork.creator_id)
+      if (!allowed) throw new ForbiddenError('This artist limits who can purchase their artwork')
+    }
 
     // 2. Variant resolution
     let resolvedOption: VariantOption | null = null
@@ -403,6 +421,27 @@ export const cartService = {
       }
 
       enforceIsPurchasable(artwork)
+
+      // Actual point-of-sale gate — re-checked here regardless of the
+      // add-to-cart check above, since an artist could tighten their
+      // privacy setting or block the buyer after the item was added.
+      if (artwork.creator_id !== userId) {
+        const [blocked, settings] = await Promise.all([
+          blockRepository.isBlockedEitherDirection(userId, artwork.creator_id),
+          userRepository.getPrivacySettings(artwork.creator_id),
+        ])
+        if (blocked) {
+          throw new AppError(`Cannot purchase "${item.artwork.title}"`, 403, 'PURCHASE_BLOCKED')
+        }
+        const allowed = await isInteractionAllowed(settings.who_can_purchase, userId, artwork.creator_id)
+        if (!allowed) {
+          throw new AppError(
+            `The artist behind "${item.artwork.title}" limits who can purchase their artwork`,
+            403,
+            'PURCHASE_NOT_ALLOWED',
+          )
+        }
+      }
 
       // Re-resolve variant
       let option: VariantOption | null = null

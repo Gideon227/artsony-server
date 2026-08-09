@@ -1,5 +1,5 @@
 import { supabase, assertNoError } from '@/config/database'
-import type { DigitalDeliveryToken } from '@/common/types/commerce.types'
+import type { DigitalDeliveryToken, DigitalDeliveryTokenWithArtwork } from '@/common/types/commerce.types'
 
 function toToken(row: any): DigitalDeliveryToken {
   return {
@@ -13,6 +13,21 @@ function toToken(row: any): DigitalDeliveryToken {
     max_downloads:      row['max_downloads'],
     last_downloaded_at: row['last_downloaded_at'] ? new Date(row['last_downloaded_at']) : null,
     created_at:         new Date(row['created_at']),
+  }
+}
+
+function toTokenWithArtwork(row: any): DigitalDeliveryTokenWithArtwork {
+  const artwork = (row['artworks'] ?? {}) as Record<string, unknown>
+  const assets  = (artwork['assets'] as any[] | undefined) ?? []
+  const primaryAsset = assets.find((a) => a?.['ordering_index'] === 0) ?? assets[0]
+
+  return {
+    ...toToken(row),
+    artwork_title:          (artwork['title'] as string | undefined) ?? 'Untitled artwork',
+    artwork_slug:           (artwork['slug'] as string | undefined) ?? '',
+    artwork_thumbnail_url:  (primaryAsset?.['thumbnail_url'] as string | undefined)
+      ?? (primaryAsset?.['original_url'] as string | undefined)
+      ?? null,
   }
 }
 
@@ -68,15 +83,15 @@ export const deliveryRepository = {
     return toToken(result.data)
   },
 
-  async findByBuyer(buyerId: string): Promise<DigitalDeliveryToken[]> {
+  async findByBuyer(buyerId: string): Promise<DigitalDeliveryTokenWithArtwork[]> {
     const result = await (supabase() as any)
       .from('digital_delivery_tokens')
-      .select('*')
+      .select('*, artworks!artwork_id ( title, slug, assets )')
       .eq('buyer_id', buyerId)
       .order('created_at', { ascending: false })
 
     if (result.error) return []
-    return (result.data ?? []).map(toToken)
+    return (result.data ?? []).map(toTokenWithArtwork)
   },
 
   // Atomically increments download_count and updates last_downloaded_at.

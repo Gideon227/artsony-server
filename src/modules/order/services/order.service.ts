@@ -514,12 +514,32 @@ export const orderService = {
     assertTransition('PAYMENT_CONFIRMED', nextStatus)
     const updated = await orderRepository.updateStatus(orderId, nextStatus)
 
-    // Generate download tokens for digital items (fire and forget — buyer
-    // can retrieve them from GET /api/delivery/my-downloads)
+    // Generate download tokens for digital items and notify the buyer.
+    // Must be awaited: fulfillOrder runs from the background blockchain
+    // verifier job (see payment.service.ts), not a live buyer request, so
+    // this is the only point at which the buyer can be told their purchase
+    // is ready. A failure here must not roll back fulfillment (the order is
+    // already paid and confirmed) — it's caught and logged so the buyer can
+    // still self-serve via GET /api/delivery/my-downloads even if the
+    // notification email fails.
     if (hasDigital) {
-      import('../../delivery/services/delivery.service.js').then(({ deliveryService }) => {
-        void deliveryService.generateTokensForOrder(orderId, order.buyer_id)
-      }).catch(() => {})
+      try {
+        const { deliveryService } = await import('../../delivery/services/delivery.service.js')
+        await deliveryService.generateTokensForOrder(orderId, order.buyer_id)
+
+        const buyer = await userRepository.findById(order.buyer_id)
+        if (buyer) {
+          await emailService.sendDigitalDeliveryEmail({
+            to:      buyer.email,
+            orderId,
+            items:   order.items
+              .filter(i => i.artwork_format === 'DIGITAL')
+              .map(i => ({ artwork_title: i.artwork_title })),
+          })
+        }
+      } catch (err) {
+        console.error(`[OrderFulfillment] Failed to issue/notify digital delivery for order ${orderId}:`, err)
+      }
     }
 
     // Credit wallet ledger — one entry PER ORDER ITEM (not aggregated per

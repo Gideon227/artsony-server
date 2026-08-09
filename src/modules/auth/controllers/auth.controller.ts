@@ -5,6 +5,25 @@ import { extractRequestContext } from '@/middleware/error.middleware'
 import { config } from '@/config'
 import { ValidationError } from '@/common/errors'
 import type { OAuthProfile } from '@/common/types'
+import { sanitiseUser } from '@/common/utils/sanitise-user'
+
+// Profile enrichment (joining the profiles table for display_name/avatar/
+// social links/etc.) must never be able to break the core auth flow —
+// login, register, and /me all need to keep working even if that join
+// fails for some reason (e.g. a pending migration, a transient DB issue).
+// Falls back to the bare user row, which sanitiseUser can still handle.
+async function withProfileOrFallback(
+  user: import('@/common/types').User,
+): Promise<import('@/common/types').User | import('@/common/types').UserWithProfile> {
+  try {
+    const { userRepository } = await import('../repositories/user.repository.js')
+    const fullUser = await userRepository.findByIdWithProfile(user.id)
+    return fullUser ?? user
+  } catch (err) {
+    console.error('[Auth] Profile enrichment failed, falling back to bare user:', err)
+    return user
+  }
+}
 
 const REFRESH_COOKIE = 'artsony_rt'
 
@@ -94,7 +113,7 @@ export async function handleRegister(
       success: true,
       data: {
         accessToken: tokens.accessToken,
-        user: sanitiseUser(user),
+        user: sanitiseUser(await withProfileOrFallback(user)),
       },
     })
   } catch (err) {
@@ -119,7 +138,7 @@ export async function handleLogin(
       success: true,
       data: {
         accessToken: tokens.accessToken,
-        user: sanitiseUser(user),
+        user: sanitiseUser(await withProfileOrFallback(user)),
       },
     })
   } catch (err) {
@@ -216,6 +235,54 @@ export async function handleResetPassword(
   }
 }
 
+export const changePasswordValidation = [
+  body('currentPassword').isString().notEmpty().withMessage('Current password is required'),
+  body('newPassword').isLength({ min: 8, max: 128 }),
+]
+
+export async function handleChangePassword(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    assertValid(req)
+    if (!req.auth) { res.status(401).json({ success: false }); return }
+
+    const { currentPassword, newPassword } = req.body as { currentPassword: string; newPassword: string }
+    const ctx = extractRequestContext(req)
+
+    await authService.changePassword({ userId: req.auth.sub, currentPassword, newPassword, ctx })
+
+    // Sessions were just revoked (including this one) — clear the refresh
+    // cookie so the client doesn't retain a dead one, same as delete/logout.
+    clearRefreshCookie(res)
+    res.json({ success: true, message: 'Password changed. Please sign in again.' })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export async function handleDeactivateAccount(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.auth) { res.status(401).json({ success: false }); return }
+
+    const { password } = req.body as { password?: string }
+    const ctx = extractRequestContext(req)
+
+    await authService.deactivateAccount({ userId: req.auth.sub, ...(password !== undefined && { password }), ctx })
+
+    clearRefreshCookie(res)
+    res.json({ success: true, message: 'Account deactivated. Log back in anytime to reactivate.' })
+  } catch (err) {
+    next(err)
+  }
+}
+
 export async function handleDeleteAccount(
   req: Request,
   res: Response,
@@ -248,7 +315,7 @@ export async function handleMe(
     const user = await userRepository.findById(req.auth.sub)
     if (!user) { res.status(404).json({ success: false }); return }
 
-    res.json({ success: true, data: sanitiseUser(user) })
+    res.json({ success: true, data: sanitiseUser(await withProfileOrFallback(user)) })
   } catch (err) {
     next(err)
   }
@@ -288,11 +355,4 @@ export async function handleOAuthCallback(
   } catch (err) {
     next(err)
   }
-}
-
-// ─── Sanitise user before sending to client ───────────────────────────────────
-
-function sanitiseUser(user: import('@/common/types').User) {
-  const { password_hash, token_version, failed_login_attempts, locked_until, ...safe } = user
-  return safe
 }

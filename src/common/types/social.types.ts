@@ -51,3 +51,18 @@ export type FollowFilters = {
   page?: number | undefined
   limit?: number | undefined
 }
+
+// ── Blocks ───────────────────────────────────────────────────────────────────
+
+export type BlockedUser = {
+  id: string
+  username: string
+  display_name: string | null
+  avatar_url: string | null
+  blocked_at: Date
+}
+
+export type BlockFilters = {
+  page?: number | undefined
+  limit?: number | undefined
+}

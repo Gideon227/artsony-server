@@ -3,9 +3,10 @@ import { passport } from '../auth/strategies/oauth.strategies'
 import {
   handleRegister, handleLogin, handleLogout, handleRefresh,
   handleForgotPassword, handleResetPassword, handleDeleteAccount,
+  handleChangePassword, handleDeactivateAccount,
   handleMe, handleOAuthCallback,
   registerValidation, loginValidation,
-  forgotPasswordValidation, resetPasswordValidation,
+  forgotPasswordValidation, resetPasswordValidation, changePasswordValidation,
 } from '../auth/controllers/auth.controller'
 import { requireAuth } from '@/middleware/auth.middleware'
 import {
@@ -28,6 +29,8 @@ router.post('/login', loginRateLimit, loginSlowDown, loginValidation, handleLogi
 router.post('/logout', requireAuth, handleLogout)
 router.post('/refresh', handleRefresh)
 router.get('/me', requireAuth, handleMe)
+router.patch('/password', requireAuth, changePasswordValidation, handleChangePassword)
+router.post('/deactivate', requireAuth, handleDeactivateAccount)
 router.delete('/account', requireAuth, handleDeleteAccount)
 
 // ─── Password reset ───────────────────────────────────────────────────────────

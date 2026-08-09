@@ -75,15 +75,15 @@ export async function handleArtworkUpload(
 
     res.status(201).json({
       original_url: cloudAsset.secure_url,
-      optimized_url: cloudAsset.resource_type === 'image' ? cloudAsset.secure_url : null,
-      thumbnail_url: cloudAsset.resource_type === 'image' ? cloudAsset.secure_url : null,
+      optimized_url: cloudAsset.optimized_url,
+      thumbnail_url: cloudAsset.thumbnail_url,
       mime_type: req.file.mimetype,
       file_size_bytes: cloudAsset.bytes,
       width: cloudAsset.width || null,
       height: cloudAsset.height || null,
     });
   } catch (err) {
-    console.error('EXACT UPLOAD ERROR:', err);
+    console.error('[UploadController] Upload failed:', err);
     next(err);
   }
 }

@@ -2,6 +2,7 @@ import { messageRepository } from '../repositories/message.repository'
 import { conversationRepository } from '../repositories/conversation.repository'
 import { broadcastService } from './broadcast.service'
 // Removed unused notificationService import to clean up
+import { blockRepository } from '@/modules/block/repositories/block.repository'
 import { checkAndSetIdempotency } from '@/modules/redis/redis.pubsub'
 import { getRedis } from '@/modules/redis/redis.client'
 import {
@@ -26,7 +27,15 @@ export const messageService = {
   // ── Send a message ────────────────────────────────────────────────────────
 
     async send(input: SendMessageInput): Promise<MessageWithSender> {
-        // ── Idempotency check ──────────────────────────────────────────────────
+        // ── Idempotency fast path ────────────────────────────────────────────────
+        // Redis check-and-set. This is a best-effort optimization that avoids a
+        // DB round trip for the common "double-tapped send" case — it is NOT the
+        // source of correctness. There is a window between the initial 'pending'
+        // SET NX below and the later update to the real message id (after
+        // persistence) where a concurrent duplicate request can also observe
+        // 'pending' and fall through past this check. The actual guarantee
+        // against a duplicate row ever being created is the UNIQUE index on
+        // messages.client_message_id, enforced in messageRepository.create().
         const { isDuplicate, existingId } = await checkAndSetIdempotency(
         input.client_message_id,
         'pending',   
@@ -46,6 +55,21 @@ export const messageService = {
         throw new ForbiddenError('Not a participant of this conversation')
         }
 
+        // A block should stop new messages even in a conversation that
+        // already existed before the block happened — getOrCreateDirect
+        // only gates conversation *creation*, so this is re-checked here
+        // for every send. Scoped to direct conversations; broadcasts are
+        // one-way announcements, not a 1:1 relationship to block.
+        const conversation = await conversationRepository.findById(input.conversation_id)
+        if (conversation?.type === 'direct') {
+        const participantIds = await conversationRepository.getParticipantIds(input.conversation_id)
+        const otherId = participantIds.find((id) => id !== input.sender_id)
+        if (otherId) {
+            const blocked = await blockRepository.isBlockedEitherDirection(input.sender_id, otherId)
+            if (blocked) throw new ForbiddenError('You cannot message this user')
+        }
+        }
+
         // ── Validate reply target ──────────────────────────────────────────────
         if (input.reply_to_id) {
         const parent = await messageRepository.findById(input.reply_to_id)
@@ -58,13 +82,14 @@ export const messageService = {
         }
 
         // ── Persist ────────────────────────────────────────────────────────────
-        const message = await messageRepository.create({
-        conversationId: input.conversation_id,
-        senderId:       input.sender_id,
-        body:           input.body,
-        type:           input.type ?? 'text',
-        replyToId:      input.reply_to_id ?? null,
-        metadata:       input.metadata ?? {},
+        const { message, deduped } = await messageRepository.create({
+        conversationId:   input.conversation_id,
+        senderId:         input.sender_id,
+        body:             input.body,
+        type:             input.type ?? 'text',
+        replyToId:        input.reply_to_id ?? null,
+        metadata:         input.metadata ?? {},
+        clientMessageId:  input.client_message_id,
         })
 
         // Update idempotency key with the real message id now that it's persisted
@@ -78,6 +103,11 @@ export const messageService = {
         // ── Fetch with sender profile for the WS payload ───────────────────────
         const withSender = await messageRepository.findByIdWithSender(message.id)
         if (!withSender) throw new Error('Message hydration failed after insert')
+
+        // A concurrent duplicate request already won the insert race and fanned
+        // this message out — skip re-broadcasting/re-notifying so recipients and
+        // the sender's other devices don't see/hear it twice.
+        if (deduped) return withSender
 
         // ── Fan-out delivery ───────────────────────────────────────────────────
         await broadcastService.fanOutMessage(withSender, input.client_message_id)

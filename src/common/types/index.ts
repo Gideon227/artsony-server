@@ -11,12 +11,13 @@ import { Moodboard } from "./moodboard.types"
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type UserRole = 'USER' | 'ARTIST' | 'MODERATOR' | 'ADMIN'
-export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED'
+export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED' | 'DEACTIVATED'
 export type AuthProvider = 'local' | 'google' | 'facebook'
 
 export type User = {
   id: string
   email: string
+  username: string
   password_hash: string | null
   provider: AuthProvider
   provider_id: string | null
@@ -33,7 +34,39 @@ export type User = {
   created_at: Date
   updated_at: Date
   deleted_at: Date | null
+  purged_at: Date | null
 }
+
+// profiles table fields, joined onto User for endpoints that need the full
+// public-facing profile (GET /me, login/register responses, PATCH /me).
+// All nullable since a profiles row isn't guaranteed to exist yet for
+// every user (see userRepository.findByIdWithProfile).
+export type UserProfileFields = {
+  display_name: string | null
+  avatar_url: string | null
+  bio: string | null
+  location: string | null
+  background_url: string | null
+  website_url: string | null
+  behance_url: string | null
+  pinterest_url: string | null
+  twitter_url: string | null
+  linkedin_url: string | null
+  followers_count: number
+  following_count: number
+  artworks_count: number
+  sales_count: number
+}
+
+export type PrivacyLevel = 'EVERYONE' | 'FOLLOWERS' | 'NO_ONE'
+
+export type PrivacySettings = {
+  who_can_message: PrivacyLevel
+  who_can_comment: PrivacyLevel
+  who_can_purchase: PrivacyLevel
+}
+
+export type UserWithProfile = User & UserProfileFields
 
 // Public-safe user shape for embedding in responses (no sensitive fields)
 export type PublicUser = {

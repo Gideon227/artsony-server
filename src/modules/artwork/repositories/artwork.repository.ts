@@ -543,9 +543,9 @@ export const artworkRepository = {
       (supabase() as any).from('order_reviews').select('artwork_id').eq('buyer_id', userId).eq('rating', 5),
     ])
 
-    if (likedRes.error)     throw new Error(`[Supabase:artwork.getEngagedCategories:likes] ${likedRes.error.message}`)
+    if (likedRes.error) throw new Error(`[Supabase:artwork.getEngagedCategories:likes] ${likedRes.error.message}`)
     if (commentedRes.error) throw new Error(`[Supabase:artwork.getEngagedCategories:comments] ${commentedRes.error.message}`)
-    if (ratedRes.error)     throw new Error(`[Supabase:artwork.getEngagedCategories:reviews] ${ratedRes.error.message}`)
+    if (ratedRes.error) throw new Error(`[Supabase:artwork.getEngagedCategories:reviews] ${ratedRes.error.message}`)
 
     const artworkIds = Array.from(new Set([
       ...(likedRes.data ?? []).map((r: any) => r['artwork_id']),

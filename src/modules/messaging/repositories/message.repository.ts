@@ -58,31 +58,52 @@ export const messageRepository = {
   // ── Insert a new message ──────────────────────────────────────────────────
 
   async create(input: {
-    conversationId:   string
-    senderId:         string
-    body:             string
-    type:             MessageType
-    replyToId:        string | null
+    conversationId:    string
+    senderId:          string
+    body:              string
+    type:              MessageType
+    replyToId:         string | null
     // FIX: Expect strict MessageMetadata instead of Record<string, unknown>
-    metadata:         MessageMetadata 
-    isBroadcastRoot?: boolean
-  }): Promise<Message> {
+    metadata:          MessageMetadata 
+    isBroadcastRoot?:  boolean
+    clientMessageId?:  string
+  }): Promise<{ message: Message; deduped: boolean }> {
     const result = await (supabase() as any)
       .from('messages')
       .insert({
-        conversation_id:   input.conversationId,
-        sender_id:         input.senderId,
-        body:              input.body,
-        type:              input.type,
-        reply_to_id:       input.replyToId,
-        metadata:          input.metadata,
-        is_broadcast_root: input.isBroadcastRoot ?? false,
+        conversation_id:    input.conversationId,
+        sender_id:          input.senderId,
+        body:               input.body,
+        type:               input.type,
+        reply_to_id:        input.replyToId,
+        metadata:           input.metadata,
+        is_broadcast_root:  input.isBroadcastRoot ?? false,
+        client_message_id:  input.clientMessageId ?? null,
       })
       .select('*')
       .single()
 
+    // Unique violation on client_message_id means a concurrent request for
+    // the same client-generated id already won the race and persisted the
+    // message first (see messages_client_message_id_uidx). This is the
+    // authoritative de-dup guard — the Redis idempotency key in
+    // messageService.send() is only a fast-path optimization and has a
+    // window where two concurrent requests can both observe 'pending' and
+    // both reach this insert. Treat this as a successful dedupe, not an
+    // error: fetch and return the row that actually won.
+    if (result.error?.code === '23505' && input.clientMessageId) {
+      const existing = await (supabase() as any)
+        .from('messages')
+        .select('*')
+        .eq('client_message_id', input.clientMessageId)
+        .single()
+
+      assertNoError(existing, 'MessageRepo:create:dedupeLookup')
+      return { message: toMessage(existing.data as Record<string, unknown>), deduped: true }
+    }
+
     assertNoError(result, 'MessageRepo:create')
-    return toMessage(result.data as Record<string, unknown>)
+    return { message: toMessage(result.data as Record<string, unknown>), deduped: false }
   },
 
   // ── Find a single message by id ───────────────────────────────────────────

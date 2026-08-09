@@ -369,4 +369,52 @@ export const emailService = {
       text: `Your account is scheduled for deletion on ${dateStr}. Contact support to cancel.`,
     })
   },
+
+  // Notifies the buyer that a DIGITAL purchase is ready. Deliberately does
+  // NOT embed the one-time raw download token in the email — email is not a
+  // fully trusted transport (forwarding, provider-side scanning/caching,
+  // browser history) and links to the authenticated "My Downloads" page
+  // instead, which verifies ownership via the buyer's session rather than a
+  // bearer token. This also means the download stays reachable even if this
+  // specific email is lost, delayed, or filtered to spam.
+  async sendDigitalDeliveryEmail(input: {
+    to: string
+    orderId: string
+    items: Array<{ artwork_title: string }>
+  }): Promise<void> {
+    const shortId = input.orderId.slice(0, 8).toUpperCase()
+
+    const itemList = input.items
+      .map(item => `<li style="margin:0 0 6px;font-size:14px;color:#25282D;">${item.artwork_title}</li>`)
+      .join('')
+
+    const html = baseTemplate(`
+      <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#25282D;">
+        Your artwork is ready to download
+      </h2>
+      <p style="margin:0 0 16px;font-size:15px;color:#525965;line-height:1.6;">
+        Payment for order <strong>#${shortId}</strong> has been confirmed. The following digital
+        item${input.items.length > 1 ? 's are' : ' is'} ready:
+      </p>
+      <ul style="margin:0 0 24px;padding-left:20px;">
+        ${itemList}
+      </ul>
+      <a href="${config.app.frontendUrl}/my-orders/downloads"
+         style="display:inline-block;background:#F25B38;color:#fff;font-weight:600;font-size:15px;
+                padding:14px 32px;border-radius:999px;text-decoration:none;">
+        View My Downloads
+      </a>
+      <p style="margin:24px 0 0;font-size:12px;color:#788191;">
+        Each file can be downloaded up to 3 times and the link expires after 7 days. Sign in to
+        your Artsony account to download.
+      </p>
+    `)
+
+    await enqueue({
+      to:      input.to,
+      subject: `Your Artsony order #${shortId} is ready to download`,
+      html,
+      text: `Your digital artwork from order #${shortId} is ready. Download it at ${config.app.frontendUrl}/my-orders/downloads`,
+    })
+  },
 }

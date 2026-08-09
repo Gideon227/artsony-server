@@ -235,6 +235,15 @@ export type DigitalDeliveryToken = {
   created_at: Date
 }
 
+// Buyer-facing "My Downloads" list needs enough to render a usable card —
+// a bare token row alone (id/hashes/counters) isn't enough context for a
+// buyer to recognize which purchase it belongs to.
+export type DigitalDeliveryTokenWithArtwork = DigitalDeliveryToken & {
+  artwork_title: string
+  artwork_slug: string
+  artwork_thumbnail_url: string | null
+}
+
 // ── Payment / Transaction ─────────────────────────────────────────────────────
 
 export type Transaction = {
