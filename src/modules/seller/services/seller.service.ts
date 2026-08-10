@@ -92,6 +92,27 @@ export async function updateMyRegistration(
   )
 }
 
+// Distinct endpoint from the above — see updateDispatchAddressByUser's
+// comment for why this is scoped to APPROVED sellers and to
+// address-only fields.
+export async function updateDispatchAddress(
+  userId: string,
+  input: Partial<Pick<SellerRegistration, 'address' | 'state' | 'country' | 'postal_code' | 'phone_number'>>,
+): Promise<SellerRegistration> {
+  const updated = await sellerRepository.updateDispatchAddressByUser(userId, input)
+  if (updated) return updated
+
+  const existing = await sellerRepository.findByUserId(userId)
+  if (!existing) throw new NotFoundError('Seller registration')
+  throw new AppError(
+    existing.status === 'PENDING'
+      ? 'Your seller application is still pending review — dispatch address updates are available once approved.'
+      : 'Dispatch address can only be updated for an approved seller account.',
+    409,
+    'SELLER_NOT_APPROVED',
+  )
+}
+
 // ── Admin: read ────────────────────────────────────────────────────────────────
 
 export async function getRegistrationById(id: string): Promise<SellerRegistration> {

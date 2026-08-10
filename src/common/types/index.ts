@@ -291,6 +291,7 @@ export type NotificationType =
   | 'message'
   | 'broadcast'
   | 'mention'
+  | 'review'
 
 export type NotificationPreferences = {
   id:             string

@@ -63,6 +63,14 @@ export const updateRegistrationValidation = [
   body('postal_code').optional().isString().trim().isLength({ max: 30 }),
 ]
 
+export const updateDispatchAddressValidation = [
+  body('phone_number').optional().isString().trim().isLength({ min: 5, max: 30 }),
+  body('address').optional().isString().trim().isLength({ min: 1, max: 300 }),
+  body('state').optional().isString().trim().isLength({ min: 1, max: 120 }),
+  body('country').optional().isString().trim().isLength({ min: 2, max: 2 }),
+  body('postal_code').optional().isString().trim().isLength({ max: 30 }),
+]
+
 export const idParamValidation = [
   param('id').isUUID().withMessage('id must be a valid UUID'),
 ]
@@ -146,6 +154,32 @@ export async function handleUpdateMyRegistration(
     }
 
     const registration = await sellerService.updateMyRegistration(req.auth.sub, input)
+
+    res.json({ success: true, data: registration })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export async function handleUpdateDispatchAddress(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    assertValid(req)
+    if (!req.auth) throw new UnauthorizedError()
+
+    const payload = req.body as Record<string, any>
+    const input = {
+      ...(payload['phone_number'] !== undefined ? { phone_number: String(payload['phone_number']).trim() } : {}),
+      ...(payload['address'] !== undefined ? { address: String(payload['address']).trim() } : {}),
+      ...(payload['state'] !== undefined ? { state: String(payload['state']).trim() } : {}),
+      ...(payload['country'] !== undefined ? { country: String(payload['country']).trim().toUpperCase() } : {}),
+      ...(payload['postal_code'] !== undefined ? { postal_code: String(payload['postal_code']).trim() } : {}),
+    }
+
+    const registration = await sellerService.updateDispatchAddress(req.auth.sub, input)
 
     res.json({ success: true, data: registration })
   } catch (err) {

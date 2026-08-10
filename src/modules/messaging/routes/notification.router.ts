@@ -6,8 +6,11 @@ import {
   handleGetUnreadCount,
   handleMarkRead,
   handleMarkAllRead,
+  handleGetPreferences,
+  handleUpdatePreferences,
   listNotificationsValidation,
   markReadValidation,
+  updatePreferencesValidation,
 } from '../controllers/notification.controller'
 
 const router = Router()
@@ -21,6 +24,11 @@ router.get('/', listNotificationsValidation, handleListNotifications)
 // GET  /api/notifications/unread-count
 // Must be registered before /:id to avoid param collision
 router.get('/unread-count', handleGetUnreadCount)
+
+// GET/PATCH /api/notifications/preferences
+// Must be registered before /:id to avoid param collision
+router.get('/preferences', handleGetPreferences)
+router.patch('/preferences', updatePreferencesValidation, handleUpdatePreferences)
 
 // POST /api/notifications/read-all
 router.post('/read-all', handleMarkAllRead)

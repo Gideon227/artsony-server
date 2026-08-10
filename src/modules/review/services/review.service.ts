@@ -62,7 +62,7 @@ export const reviewService = {
     void notificationService.create({
       recipientId: eligibility.seller_id,
       actorId:     input.buyerId,
-      type:        'comment',
+      type:        'review',
       entityId:    review.id,
       entityType:  'order_review',
       data: {

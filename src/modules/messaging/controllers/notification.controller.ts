@@ -39,6 +39,50 @@ function assertValid(req: Request): void {
   }
 }
 
+const NOTIFICATION_TYPES = [
+  'like', 'comment', 'reply', 'follow', 'sale', 'order_update',
+  'system', 'message', 'broadcast', 'mention', 'review',
+]
+
+export const updatePreferencesValidation = [
+  body('push_enabled').optional().isBoolean(),
+  body('email_enabled').optional().isBoolean(),
+  body('ws_enabled').optional().isBoolean(),
+  body('types_muted').optional().isArray(),
+  body('types_muted.*').optional().isIn(NOTIFICATION_TYPES),
+]
+
+// GET /api/notifications/preferences
+export async function handleGetPreferences(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const userId = req.auth!.sub
+    const preferences = await notificationService.getPreferences(userId)
+    res.json({ success: true, data: preferences })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// PATCH /api/notifications/preferences
+export async function handleUpdatePreferences(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    assertValid(req)
+    const userId = req.auth!.sub
+    const preferences = await notificationService.updatePreferences(userId, req.body)
+    res.json({ success: true, data: preferences })
+  } catch (err) {
+    next(err)
+  }
+}
+
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 // GET /api/notifications

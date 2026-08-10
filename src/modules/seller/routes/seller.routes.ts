@@ -5,6 +5,7 @@ import {
   handleSubmitRegistration,
   handleGetMyRegistration,
   handleUpdateMyRegistration,
+  handleUpdateDispatchAddress,
   handleAdminList,
   handleAdminGetById,
   handleApprove,
@@ -13,6 +14,7 @@ import {
   handleReactivate,
   submitRegistrationValidation,
   updateRegistrationValidation,
+  updateDispatchAddressValidation,
   idParamValidation,
   reviewNotesValidation,
   listFiltersValidation,
@@ -40,6 +42,11 @@ router.get('/me', handleGetMyRegistration)
 // PATCH /api/seller-registrations/me
 //      Edit my own registration while it is still PENDING
 router.patch('/me', updateRegistrationValidation, handleUpdateMyRegistration)
+
+// PATCH /api/sellers/me/dispatch-address — for an already-APPROVED seller
+// to update where their physical inventory ships from. Distinct from the
+// route above, which only works while the application is still PENDING.
+router.patch('/me/dispatch-address', updateDispatchAddressValidation, handleUpdateDispatchAddress)
 
 // ── Admin routes ─────────────────────────────────────────────────────────────
 

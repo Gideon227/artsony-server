@@ -1,6 +1,7 @@
 import { supabase } from '@/config/database'
 import { connectionManager } from '@/modules/ws/connection-manager'
 import { getRedis } from '@/modules/redis/redis.client'
+import { notificationPreferencesRepository } from '../repositories/notification-preferences.repository'
 import type {
   MessageWithSender,
   NotificationType,
@@ -27,7 +28,25 @@ export const notificationService = {
     const type: NotificationType =
       input.message.is_broadcast_root ? 'broadcast' : 'message'
 
-    const rows = input.recipientIds.map((recipientId) => ({
+    // Per-recipient mute check — a recipient who has muted 'message' (or
+    // 'broadcast') shouldn't get a notification row created for them at
+    // all, not just a suppressed delivery. Fetched per-recipient since
+    // each has their own preferences; recipientIds lists are typically
+    // small (a single DM partner, or a bounded broadcast audience).
+    const flagsByRecipient = new Map(
+      await Promise.all(
+        input.recipientIds.map(async (id) =>
+          [id, await notificationPreferencesRepository.getEnforcementFlags(id)] as const,
+        ),
+      ),
+    )
+
+    const eligibleRecipientIds = input.recipientIds.filter(
+      (id) => !flagsByRecipient.get(id)?.types_muted.includes(type),
+    )
+    if (eligibleRecipientIds.length === 0) return
+
+    const rows = eligibleRecipientIds.map((recipientId) => ({
       recipient_id: recipientId,
       actor_id:     input.message.sender_id,
       type,
@@ -55,8 +74,14 @@ export const notificationService = {
     // and deliver a WS notification:new event to any instance where
     // the recipient might have connected in the meantime.
     await Promise.allSettled(
-      input.recipientIds.map(async (recipientId) => {
+      eligibleRecipientIds.map(async (recipientId) => {
         await getRedis().incr(`artsony:notif:${recipientId}:unread`)
+
+        // ws_enabled gates real-time delivery specifically — the
+        // notification row and badge count above still apply either way,
+        // since the recipient should still see it when they check their
+        // notification list, just not get a live push.
+        if (flagsByRecipient.get(recipientId)?.ws_enabled === false) return
 
         const wsPayload: WsNotificationPayload = {
           id:          '',    // not critical for real-time display
@@ -96,6 +121,9 @@ export const notificationService = {
     entityType:   string | null
     data?:        Record<string, unknown>
   }): Promise<void> {
+    const flags = await notificationPreferencesRepository.getEnforcementFlags(input.recipientId)
+    if (flags.types_muted.includes(input.type)) return
+
     const { error, data } = await (supabase() as any)
       .from('notifications')
       .insert({
@@ -117,6 +145,10 @@ export const notificationService = {
 
     // Increment Redis badge
     await getRedis().incr(`artsony:notif:${input.recipientId}:unread`)
+
+    // ws_enabled gates real-time delivery only — the row and badge above
+    // still apply, so the recipient sees it next time they check.
+    if (!flags.ws_enabled) return
 
     // Deliver via WS
     const wsPayload: WsNotificationPayload = {
@@ -239,6 +271,24 @@ export const notificationService = {
     const total = count ?? 0
     await getRedis().setex(`artsony:notif:${userId}:unread`, 300, String(total))
     return total
+  },
+
+  // ── Preferences ────────────────────────────────────────────────────────────
+
+  async getPreferences(userId: string) {
+    return notificationPreferencesRepository.get(userId)
+  },
+
+  async updatePreferences(
+    userId: string,
+    changes: Partial<{
+      push_enabled: boolean
+      email_enabled: boolean
+      ws_enabled: boolean
+      types_muted: NotificationType[]
+    }>,
+  ) {
+    return notificationPreferencesRepository.update(userId, changes)
   },
 }
 
