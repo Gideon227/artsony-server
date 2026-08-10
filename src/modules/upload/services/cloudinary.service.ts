@@ -93,7 +93,7 @@ export const CloudinaryService = {
           return reject(error || new Error('Cloudinary upload returned empty result'));
         }
 
-        const eager = (result.eager ?? []) as Array<{ secure_url?: string }>;
+        const eager = (result['eager'] ?? []) as Array<{ secure_url?: string }>;
         // Cloudinary preserves eager transformations in the order requested:
         // eager[0] = optimized, eager[1] = thumbnail. Fall back to the
         // original secure_url if for any reason a derived asset didn't come
