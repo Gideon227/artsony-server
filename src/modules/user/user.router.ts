@@ -7,11 +7,13 @@ import {
   handleUpdateProfile,
   handleGetPrivacySettings,
   handleUpdatePrivacySettings,
+  handleGetInteractionPermissions,
   handleGetUsersByIds,
   handleSearchUsers,
   onboardingValidation,
   updateProfileValidation,
   updatePrivacySettingsValidation,
+  getInteractionPermissionsValidation,
 } from './controllers/user.controller'
 
 const router = Router()
@@ -37,6 +39,10 @@ router.get('/by-ids', handleGetUsersByIds)
 
 router.get('/me/privacy', handleGetPrivacySettings)
 router.patch('/me/privacy', updatePrivacySettingsValidation, handleUpdatePrivacySettings)
+
+// GET /api/users/:userId/permissions — can the requesting user message/
+// comment on/purchase from :userId, given :userId's privacy settings
+router.get('/:userId/permissions', getInteractionPermissionsValidation, handleGetInteractionPermissions)
 
 // ─── Onboarding ───────────────────────────────────────────────────────────────
 

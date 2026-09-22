@@ -337,12 +337,38 @@ export async function getTopPicks(
   return result
 }
 
-export async function getLocations(): Promise<{ label: string; artwork_count: number }[]> {
-  const cached = await redisGetJson<{ label: string; artwork_count: number }[]>(RedisKeys.locations())
+// "Trending this week" REGARDLESS of upload date — see getTopPicks(period=
+// 'week') above for the upload-date-scoped version. This scores by summed
+// artwork_engagement_daily activity in the window, so an artwork uploaded
+// months ago that just picked up a burst of likes/views still qualifies.
+export async function getTrendingArtworks(
+  limit = 8,
+  windowDays = 7,
+  listingType?: 'MARKETPLACE' | 'PORTFOLIO',
+): Promise<Artwork[]> {
+  const cacheKey = RedisKeys.trending(limit, windowDays, listingType)
+  const cached = await redisGetJson<Artwork[]>(cacheKey)
   if (cached) return cached
 
-  const result = await artworkRepository.getDistinctLocations()
-  void redisSetJson(RedisKeys.locations(), result, RedisTTL.artworkFeed)
+  const sinceDay = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10)
+  const result = await artworkRepository.getTrendingByActivity(sinceDay, limit, listingType)
+
+  void redisSetJson(cacheKey, result, RedisTTL.artworkFeed)
+  return result
+}
+
+export async function getLocations(
+  level: 'country' | 'state' | 'city',
+  parent: { country?: string; state?: string } = {},
+): Promise<{ label: string; artwork_count: number }[]> {
+  const cacheKey = RedisKeys.locations(level, parent.country, parent.state)
+  const cached = await redisGetJson<{ label: string; artwork_count: number }[]>(cacheKey)
+  if (cached) return cached
+
+  const result = await artworkRepository.getDistinctLocations(level, parent)
+  void redisSetJson(cacheKey, result, RedisTTL.artworkFeed)
   return result
 }
 
@@ -414,6 +440,15 @@ export async function getFeed(
       // category affinity from what the requester has liked, commented on,
       // or rated 5 stars. A brand-new user with no signal yet just gets the
       // default trending order rather than an empty feed.
+      //
+      // If the requester explicitly picked a category filter themselves,
+      // that takes priority — this used to unconditionally overwrite it
+      // with the auto-computed engagement categories, silently discarding
+      // whatever the user had selected in the filter UI.
+      if (base.categories?.length) {
+        return artworkRepository.list({ ...base, sort_by: 'created_at', sort_order: 'desc' })
+      }
+
       if (!requesterId) return artworkRepository.list({ ...base, sort_by: 'like_count', sort_order: 'desc' })
 
       const categories = await artworkRepository.getEngagedCategories(requesterId)

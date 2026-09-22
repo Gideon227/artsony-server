@@ -91,7 +91,10 @@ export const RedisKeys = {
   artworkList: (fingerprint: string) => `artwork:list:${fingerprint}`,
   topPicks: (limit: number, period: 'all' | 'week' = 'all', listingType?: 'MARKETPLACE' | 'PORTFOLIO') =>
     `artwork:top-picks:${period}:${limit}:${listingType ?? 'ALL'}`,
-  locations: () => `artwork:locations`,
+  trending: (limit: number, windowDays: number, listingType?: 'MARKETPLACE' | 'PORTFOLIO') =>
+    `artwork:trending:${windowDays}d:${limit}:${listingType ?? 'ALL'}`,
+  locations: (level: string, country?: string, state?: string) =>
+    `artwork:locations:${level}:${country ?? '_'}:${state ?? '_'}`,
   sizeLabels: () => `artwork:size-labels`,
   artworkViewLock:(artworkId: string, id: string) => `artwork:view:${artworkId}:${id}`,
   artworkFeatured:(limit: number) => `artwork:featured:${limit}`,

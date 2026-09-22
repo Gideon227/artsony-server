@@ -45,7 +45,9 @@ export type UserProfileFields = {
   display_name: string | null
   avatar_url: string | null
   bio: string | null
-  location: string | null
+  country: string | null
+  state: string | null
+  city: string | null
   background_url: string | null
   website_url: string | null
   behance_url: string | null

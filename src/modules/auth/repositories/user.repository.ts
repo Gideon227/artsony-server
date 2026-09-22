@@ -32,7 +32,9 @@ function toUserWithProfile(row: any): UserWithProfile {
     ['display_name']:    profile?.['display_name'] ?? null,
     ['avatar_url']:      profile?.['avatar_url'] ?? null,
     ['bio']:             profile?.['bio'] ?? null,
-    ['location']:        profile?.['location'] ?? null,
+    ['country']:         profile?.['country'] ?? null,
+    ['state']:           profile?.['state'] ?? null,
+    ['city']:            profile?.['city'] ?? null,
     ['background_url']:  profile?.['background_url'] ?? null,
     ['website_url']:     profile?.['website_url'] ?? null,
     ['behance_url']:     profile?.['behance_url'] ?? null,
@@ -307,7 +309,9 @@ export const userRepository = {
         ['display_name']: null,
         ['avatar_url']:   null,
         ['bio']:          null,
-        ['location']:     null,
+        ['country']:      null,
+        ['state']:        null,
+        ['city']:         null,
       })
       .eq('user_id', id)
 
@@ -435,7 +439,7 @@ export const userRepository = {
       .select(`
         *,
         profile:profiles (
-          username, display_name, avatar_url, bio, location, background_url,
+          username, display_name, avatar_url, bio, country, state, city, background_url,
           website_url, behance_url, pinterest_url, twitter_url, linkedin_url,
           followers_count, following_count, artworks_count, sales_count
         )
@@ -476,7 +480,7 @@ export const userRepository = {
     fields: Partial<
       Pick<
         UserProfileFields,
-        | 'display_name' | 'avatar_url' | 'bio' | 'location' | 'background_url'
+        | 'display_name' | 'avatar_url' | 'bio' | 'country' | 'state' | 'city' | 'background_url'
         | 'website_url' | 'behance_url' | 'pinterest_url' | 'twitter_url' | 'linkedin_url'
       >
     >,

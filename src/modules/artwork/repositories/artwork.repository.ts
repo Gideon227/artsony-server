@@ -10,7 +10,18 @@ import type {
   CreateArtworkInput,
   UpdateArtworkInput,
   FeaturedArtwork,
+  LicenseType,
 } from '@/common/types/artwork.types'
+
+// Display label + canonical CC URL for each stored license_type — kept here
+// rather than in the DB so copy changes don't need a migration. Labels match
+// upload-step-two.tsx's dropdown text exactly.
+const LICENSE_INFO: Record<LicenseType, { type: string; url: string }> = {
+  'attribution': { type: 'Attribution (CC BY)', url: 'https://creativecommons.org/licenses/by/4.0/' },
+  'attribution-sharealike': { type: 'Attribution-ShareAlike (CC BY-SA)', url: 'https://creativecommons.org/licenses/by-sa/4.0/' },
+  'attribution-derivs': { type: 'Attribution Derivs (CC BY-ND)', url: 'https://creativecommons.org/licenses/by-nd/4.0/' },
+  'attribution-non-commercial': { type: 'Attribution-Non-commercial (CC BY-NC)', url: 'https://creativecommons.org/licenses/by-nc/4.0/' },
+}
 
 // ── Row → Domain mapper ───────────────────────────────────────────────────────
 function parseJsonField<T>(value: any, fallback: T): T {
@@ -21,7 +32,7 @@ function parseJsonField<T>(value: any, fallback: T): T {
   return value as T
 }
 
-function toArtwork(row: any, isSaved?: boolean): Artwork {
+function toArtwork(row: any, isSaved?: boolean, isLiked?: boolean): Artwork {
   return {
     ['id']: row['id'],
     ['listing_type']: row['listing_type'],
@@ -44,6 +55,7 @@ function toArtwork(row: any, isSaved?: boolean): Artwork {
     ['status']: row['status'],
     ['is_flagged']: row['is_flagged'],
     ...(isSaved !== undefined ? { is_saved: isSaved } : {}),
+    ...(isLiked !== undefined ? { is_liked: isLiked } : {}),
     ['moderation_status']: row['moderation_status'],
     ['reviewed_by']: row['reviewed_by'] ?? null,
     ['review_notes']: row['review_notes'] ?? null,
@@ -53,6 +65,8 @@ function toArtwork(row: any, isSaved?: boolean): Artwork {
     ['physical_details']: parseJsonField<PhysicalDetails | null>(row['physical_details'], null),
     ['has_variants']: row['has_variants'],
     ['variants']: parseJsonField<Variant[]>(row['variants'], []),
+    ['license_type']: row['license_type'] ?? null,
+    ['license']: row['license_type'] ? LICENSE_INFO[row['license_type'] as LicenseType] ?? null : null,
     ['view_count']: row['view_count'],
     ['like_count']: row['like_count'],
     ['save_count']: row['save_count'],
@@ -181,6 +195,7 @@ export const artworkRepository = {
     if (input.price !== undefined) payload['price'] = input.price
     if (input.max_purchase_quantity !== undefined) payload['max_purchase_quantity'] = input.max_purchase_quantity
     if (input.physical_details) payload['physical_details'] = JSON.stringify(input.physical_details)
+    if (input.license_type !== undefined) payload['license_type'] = input.license_type
 
     const result = await (supabase() as any)
       .from('artworks')
@@ -205,7 +220,8 @@ export const artworkRepository = {
     if (result.error?.code === 'PGRST116') return undefined
     assertNoError(result, 'artwork.findById')
     const isSaved = requesterId ? await this.findSaveStatus(id, requesterId) : undefined
-    return toArtwork(result.data, isSaved)
+    const isLiked = requesterId ? await this.hasLiked(id, requesterId) : undefined
+    return toArtwork(result.data, isSaved, isLiked)
   },
 
 
@@ -222,7 +238,8 @@ export const artworkRepository = {
     if (result.error?.code === 'PGRST116') return undefined
     assertNoError(result, 'artwork.findBySlug')
     const isSaved = requesterId ? await this.findSaveStatus(result.data.id, requesterId) : undefined
-    return toArtwork(result.data, isSaved)
+    const isLiked = requesterId ? await this.hasLiked(result.data.id, requesterId) : undefined
+    return toArtwork(result.data, isSaved, isLiked)
   },
 
   // ── Update (SECURED WITH DEEP MERGE) ───────────────────────────────────────
@@ -254,6 +271,7 @@ export const artworkRepository = {
     if (input.currency !== undefined)             payload['currency']              = input.currency
     if (input.max_purchase_quantity !== undefined)payload['max_purchase_quantity'] = input.max_purchase_quantity
     if (input.has_variants !== undefined)         payload['has_variants']          = input.has_variants
+    if (input.license_type !== undefined)         payload['license_type']          = input.license_type
 
     // 2. Safe Array Merge for Assets
     if (input.assets !== undefined) {
@@ -427,7 +445,7 @@ export const artworkRepository = {
 
   async hasLiked(artworkId: string, userId: string): Promise<boolean> {
     const result = await (supabase() as any)
-      .from('artwork_likes')
+      .from('likes')
       .select('id')
       .eq('artwork_id', artworkId)
       .eq('user_id', userId)
@@ -453,8 +471,12 @@ export const artworkRepository = {
     // on profiles; size lives inside a JSONB array), so they're resolved
     // up front and then applied the same way creator_ids already is.
     let resolvedCreatorIds = filters.creator_ids
-    if (filters.location?.trim()) {
-      const locationCreatorIds = await this.getCreatorIdsByLocation(filters.location.trim())
+    if (filters.country || filters.state || filters.city) {
+      const locationCreatorIds = await this.getCreatorIdsByLocation({
+        country: filters.country as string,
+        state: filters.state as string,
+        city: filters.city as string,
+      })
       if (locationCreatorIds.length === 0) {
         return emptyResult(page, limit)
       }
@@ -538,7 +560,7 @@ export const artworkRepository = {
 
   async getEngagedCategories(userId: string, limit = 5): Promise<string[]> {
     const [likedRes, commentedRes, ratedRes] = await Promise.all([
-      (supabase() as any).from('artwork_likes').select('artwork_id').eq('user_id', userId),
+      (supabase() as any).from('likes').select('artwork_id').eq('user_id', userId),
       (supabase() as any).from('comments').select('artwork_id').eq('user_id', userId).is('deleted_at', null),
       (supabase() as any).from('order_reviews').select('artwork_id').eq('buyer_id', userId).eq('rating', 5),
     ])
@@ -595,22 +617,48 @@ export const artworkRepository = {
     return (result.data ?? []).map((r: any) => r['id'])
   },
 
-  // ── Location filter ("profiles.location" substring match) ───────────────────
-  // profiles.location is free text (not an ISO code), so this is a substring
-  // match rather than exact — "Lagos, Nigeria" should match a "Nigeria"
-  // filter. Two-step (resolve creator ids, then .in() on the main query),
-  // same pattern as getRecentArtistIds/getEngagedCategories above.
+  // ── Location filter (country/state/city) ────────────────────────────────────
+  // country is an ISO code, exact match. state/city are free text, so those
+  // stay substring matches. Two-step (resolve creator ids, then .in() on the
+  // main query), same pattern as getRecentArtistIds/getEngagedCategories above.
 
-  async getCreatorIdsByLocation(locationQuery: string): Promise<string[]> {
-    const result = await (supabase() as any)
-      .from('profiles')
-      .select('user_id')
-      .ilike('location', `%${locationQuery}%`)
+  async getCreatorIdsByLocation(filters: { country?: string; state?: string; city?: string }): Promise<string[]> {
+    let query = (supabase() as any).from('profiles').select('user_id')
+
+    // country is an ISO code — exact match. state/city are free text
+    // (same as shipping_addresses/seller_registrations), so fuzzy/
+    // case-insensitive match to tolerate minor variations.
+    if (filters.country) query = query.eq('country', filters.country.toUpperCase())
+    if (filters.state)   query = query.ilike('state', `%${filters.state}%`)
+    if (filters.city)    query = query.ilike('city', `%${filters.city}%`)
+
+    const result = await query
 
     if (result.error) {
       throw new Error(`[Supabase:artwork.getCreatorIdsByLocation] ${result.error.message}`)
     }
     return (result.data ?? []).map((r: any) => r['user_id'])
+  },
+
+  // Cascading distinct-value lookup backing the location filter dropdowns —
+  // see get_distinct_artist_locations() migration for the level semantics.
+  async getDistinctLocations(
+    level: 'country' | 'state' | 'city',
+    parent?: { country?: string; state?: string },
+  ): Promise<{ label: string; artwork_count: number }[]> {
+    const result = await (supabase() as any).rpc('get_distinct_artist_locations', {
+      p_level:   level,
+      p_country: parent?.country ?? null,
+      p_state:   parent?.state ?? null,
+    })
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.getDistinctLocations] ${result.error.message}`)
+    }
+    return (result.data ?? []).map((r: any) => ({
+      label: r['label'],
+      artwork_count: Number(r['artwork_count']),
+    }))
   },
 
   // ── Size variant ("Medium") filter ───────────────────────────────────────────
@@ -656,18 +704,6 @@ export const artworkRepository = {
     return ids.map((id) => byId.get(id)).filter(Boolean).map((row) => toArtwork(row))
   },
 
-  async getDistinctLocations(): Promise<{ label: string; artwork_count: number }[]> {
-    const result = await (supabase() as any).rpc('get_distinct_artist_locations')
-
-    if (result.error) {
-      throw new Error(`[Supabase:artwork.getDistinctLocations] ${result.error.message}`)
-    }
-    return (result.data ?? []).map((r: any) => ({
-      label: r['label'],
-      artwork_count: Number(r['artwork_count']),
-    }))
-  },
-
   // ── Top Picks ─────────────────────────────────────────────────────────────────
   // Real ranking algorithm (decayed hot-score, one per creator for
   // diversity) — see get_top_picks() in the same migration. Not manual
@@ -700,8 +736,31 @@ export const artworkRepository = {
 
     // Preserve the RPC's ranking order — the embed re-fetch above doesn't
     // guarantee row order matches the .in() list.
-    const byId = new Map((embedResult.data ?? []).map((row: any) => [row.id, row]))
-    return ids.map((id: string) => toArtwork(byId.get(id))).filter(Boolean)
+    const byId = new Map((embedResult.data ?? []).map((row: any) => [row['id'], row]))
+    return ids.map((id: string) => byId.get(id)).filter(Boolean).map((row: any) => toArtwork(row))
+  },
+
+  // "Trending this week regardless of upload date" — scores by summed
+  // artwork_engagement_daily activity since p_sinceDay, not by created_at,
+  // so an older artwork that picks up likes/views recently still qualifies.
+  // See 20260915000000_trending_artworks_by_activity.sql.
+  async getTrendingByActivity(
+    sinceDay: string,
+    limit = 8,
+    listingType?: 'MARKETPLACE' | 'PORTFOLIO',
+  ): Promise<Artwork[]> {
+    const result = await (supabase() as any).rpc('get_trending_artwork_ids', {
+      p_since_day: sinceDay,
+      p_limit: limit,
+      p_listing_type: listingType ?? null,
+    })
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.getTrendingByActivity] ${result.error.message}`)
+    }
+
+    const ids = (result.data ?? []).map((r: any) => r['id'])
+    return this.findManyByIdsOrdered(ids)
   },
 
   // ── Featured artworks (homepage hero) ─────────────────────────────────────────

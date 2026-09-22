@@ -10,15 +10,20 @@ import {
   handleGetFeed,
   getFeedValidation,
   handleGetTopPicks,
+  getTrendingValidation,
+  handleGetTrending,
   getTopPicksValidation,
   handleGetSizeLabels,
   handleGetLocations,
+  getLocationsValidation,
   handleUpdateArtwork,
   handlePublishArtwork,
   handleArchiveArtwork,
   handleDeleteArtwork,
   handleFlagArtwork,
   handleToggleLike,
+  trackViewValidation,
+  handleTrackView,
   createArtworkValidation,
   updateArtworkValidation,
   flagArtworkValidation,
@@ -43,9 +48,10 @@ router.use(apiRateLimit)
 
 router.get('/feed', getFeedValidation, optionalAuth, handleGetFeed)
 router.get('/top-picks', getTopPicksValidation, handleGetTopPicks)
+router.get('/trending', getTrendingValidation, handleGetTrending)
 router.get('/featured', featuredArtworksValidation, handleGetFeaturedArtworks)
 router.get('/size-labels', handleGetSizeLabels)
-router.get('/locations', handleGetLocations)
+router.get('/locations', getLocationsValidation, handleGetLocations)
 router.get('/', listArtworksValidation, optionalAuth, handleListArtworks)
 router.get('/by-slug/:slug', optionalAuth, handleGetArtworkBySlug)
 
@@ -98,6 +104,15 @@ router.post(
   '/:id/save',
   requireAuth,
   handleToggleSave,
+)
+
+// Explicit view-tracking — see handleTrackView for why this exists
+// alongside the automatic tracking on GET /:id.
+router.post(
+  '/:id/view',
+  trackViewValidation,
+  optionalAuth,
+  handleTrackView,
 )
 
 router.post(

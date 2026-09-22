@@ -1,4 +1,6 @@
 import { userRepository } from '@/modules/auth/repositories/user.repository'
+import { blockRepository } from '@/modules/block/repositories/block.repository'
+import { isInteractionAllowed } from '@/common/utils/privacy.util'
 import { ValidationError, NotFoundError } from '@/common/errors'
 import type { User, UserWithProfile, PrivacySettings } from '@/common/types'
 
@@ -89,7 +91,9 @@ export type UpdateProfileBody = {
   username?: string
   display_name?: string | null
   bio?: string | null
-  location?: string | null
+  country?: string | null
+  state?: string | null
+  city?: string | null
   interests?: string[]
   avatar_url?: string | null
   background_url?: string | null
@@ -106,7 +110,7 @@ export type UpdateProfileInput = {
 }
 
 const PROFILE_FIELD_KEYS = [
-  'display_name', 'bio', 'location', 'avatar_url', 'background_url',
+  'display_name', 'bio', 'country', 'state', 'city', 'avatar_url', 'background_url',
   'website_url', 'behance_url', 'pinterest_url', 'twitter_url', 'linkedin_url',
 ] as const satisfies readonly (keyof UpdateProfileBody)[]
 
@@ -172,4 +176,44 @@ export async function updatePrivacySettings(
   settings: Partial<PrivacySettings>,
 ): Promise<PrivacySettings> {
   return userRepository.updatePrivacySettings(userId, settings)
+}
+
+// ─── Interaction permissions (viewer-facing) ───────────────────────────────
+// What can `requesterId` do with `targetUserId`, given targetUserId's
+// privacy preferences — used by the frontend to show/hide/disable the
+// message button, comment box, and buy button on someone else's profile
+// or artwork *before* they attempt the action, rather than only surfacing
+// a 403 after the fact. Mirrors the exact rules message.service.ts,
+// comment.service.ts, and cart.service.ts enforce server-side — this is a
+// read-only preview of those checks, never a substitute for them.
+export type InteractionPermissions = {
+  can_message: boolean
+  can_comment: boolean
+  can_purchase: boolean
+}
+
+export async function getInteractionPermissions(
+  requesterId: string,
+  targetUserId: string,
+): Promise<InteractionPermissions> {
+  if (requesterId === targetUserId) {
+    return { can_message: true, can_comment: true, can_purchase: true }
+  }
+
+  const [blocked, settings] = await Promise.all([
+    blockRepository.isBlockedEitherDirection(requesterId, targetUserId),
+    userRepository.getPrivacySettings(targetUserId),
+  ])
+
+  if (blocked) {
+    return { can_message: false, can_comment: false, can_purchase: false }
+  }
+
+  const [can_message, can_comment, can_purchase] = await Promise.all([
+    isInteractionAllowed(settings.who_can_message, requesterId, targetUserId),
+    isInteractionAllowed(settings.who_can_comment, requesterId, targetUserId),
+    isInteractionAllowed(settings.who_can_purchase, requesterId, targetUserId),
+  ])
+
+  return { can_message, can_comment, can_purchase }
 }

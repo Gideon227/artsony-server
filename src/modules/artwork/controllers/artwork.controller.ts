@@ -122,6 +122,9 @@ export const createArtworkValidation = [
     .withMessage('max_purchase_quantity must be a positive integer'),
   body('has_variants')
     .optional().isBoolean(),
+  body('license_type')
+    .optional().isIn(['attribution', 'attribution-sharealike', 'attribution-derivs', 'attribution-non-commercial'])
+    .withMessage('license_type must be one of the supported license options'),
   ...assetValidation,
   ...variantValidation,
   ...physicalValidation,
@@ -160,6 +163,9 @@ export const updateArtworkValidation = [
   body('max_purchase_quantity')
     .optional().isInt({ min: 1 }),
   body('has_variants').optional().isBoolean(),
+  body('license_type')
+    .optional().isIn(['attribution', 'attribution-sharealike', 'attribution-derivs', 'attribution-non-commercial'])
+    .withMessage('license_type must be one of the supported license options'),
   ...assetValidation,
   ...variantValidation,
   ...physicalValidation,
@@ -191,7 +197,9 @@ export const listArtworksValidation = [
   query('search').optional().isString().trim().isLength({ max: 200 }),
   query('categories').optional(),
   query('creator_id').optional().isUUID(),
-  query('location').optional().isString().trim().isLength({ max: 100 }),
+  query('country').optional().isString().trim().isLength({ min: 2, max: 2 }),
+  query('state').optional().isString().trim().isLength({ max: 100 }),
+  query('city').optional().isString().trim().isLength({ max: 100 }),
   query('size_label').optional().isString().trim().isLength({ max: 50 }),
 ]
 
@@ -262,6 +270,31 @@ export async function handleGetArtwork(
   }
 }
 
+// POST /api/artworks/:id/view — explicit view tracking for surfaces that
+// already have the artwork in hand (e.g. artwork-view-overlay, which
+// receives `artwork` as a prop from an already-loaded feed/list query and
+// never calls GET /:id, so the trackView() side-effect on that route never
+// fired for real browsing). Same trackView()/Redis-dedup path as GET /:id —
+// this just gives callers a way to trigger it without a full refetch.
+export const trackViewValidation = [param('id').isUUID()]
+
+export async function handleTrackView(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    assertValid(req)
+    const { id } = req.params as { id: string }
+    const ctx = extractRequestContext(req)
+    const identity = req.auth?.sub ?? ctx.ipAddress ?? 'anonymous'
+    await artworkService.trackView(id, identity)
+    res.status(204).end()
+  } catch (err) {
+    next(err)
+  }
+}
+
 export async function handleToggleLike(
   req: Request,
   res: Response,
@@ -303,8 +336,12 @@ export const getFeedValidation = [
   query('page').optional().isInt({ min: 1 }).toInt(),
   query('limit').optional().isInt({ min: 1, max: 50 }).toInt(),
   query('categories').optional(),
-  query('location').optional().isString().trim().isLength({ max: 100 }),
+  query('country').optional().isString().trim().isLength({ min: 2, max: 2 }),
+  query('state').optional().isString().trim().isLength({ max: 100 }),
+  query('city').optional().isString().trim().isLength({ max: 100 }),
   query('size_label').optional().isString().trim().isLength({ max: 50 }),
+  query('listing_type').optional().isIn(['MARKETPLACE', 'PORTFOLIO']),
+  query('artwork_format').optional().isIn(['DIGITAL', 'PHYSICAL']),
 ]
 
 export async function handleGetFeed(
@@ -324,8 +361,12 @@ export async function handleGetFeed(
       ...(q['categories']
         ? { categories: Array.isArray(q['categories']) ? q['categories'] : [q['categories']] }
         : {}),
-      ...(q['location'] ? { location: q['location'] as string } : {}),
+      ...(q['country'] ? { country: q['country'] as string } : {}),
+      ...(q['state'] ? { state: q['state'] as string } : {}),
+      ...(q['city'] ? { city: q['city'] as string } : {}),
       ...(q['size_label'] ? { size_label: q['size_label'] as string } : {}),
+      ...(q['listing_type'] ? { listing_type: q['listing_type'] } : {}),
+      ...(q['artwork_format'] ? { artwork_format: q['artwork_format'] } : {}),
     } as ArtworkFilters
 
     const result = await artworkService.getFeed(mode, filters, req.auth?.sub)
@@ -380,13 +421,52 @@ export async function handleGetTopPicks(
   }
 }
 
-export async function handleGetLocations(
-  _req: Request,
+// GET /api/artworks/trending — "trending regardless of upload date" (see
+// getTrendingArtworks in artwork.service.ts). Distinct from /top-picks?
+// period=week, which is scoped to artworks *uploaded* in the window.
+export const getTrendingValidation = [
+  query('limit').optional().isInt({ min: 1, max: 20 }).toInt(),
+  query('windowDays').optional().isInt({ min: 1, max: 90 }).toInt(),
+  query('listingType').optional().isIn(['MARKETPLACE', 'PORTFOLIO']),
+]
+
+export async function handleGetTrending(
+  req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> {
   try {
-    const data = await artworkService.getLocations()
+    assertValid(req)
+    const limit = (req.query['limit'] as number | undefined) ?? 8
+    const windowDays = (req.query['windowDays'] as number | undefined) ?? 7
+    const listingType = req.query['listingType'] as 'MARKETPLACE' | 'PORTFOLIO' | undefined
+    const data = await artworkService.getTrendingArtworks(limit, windowDays, listingType)
+    res.json({ success: true, data })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const getLocationsValidation = [
+  query('level').isIn(['country', 'state', 'city']),
+  query('country').optional().isString().trim().isLength({ min: 2, max: 2 }),
+  query('state').optional().isString().trim().isLength({ max: 100 }),
+]
+
+export async function handleGetLocations(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    assertValid(req)
+    const q = req.query as Record<string, any>
+    const level = q['level'] as 'country' | 'state' | 'city'
+
+    const data = await artworkService.getLocations(level, {
+      ...(q['country'] ? { country: (q['country'] as string).toUpperCase() } : {}),
+      ...(q['state'] ? { state: q['state'] as string } : {}),
+    })
     res.json({ success: true, data })
   } catch (err) {
     next(err)
@@ -437,7 +517,9 @@ export async function handleListArtworks(
               : [q['categories']],
           }
         : {}),
-      ...(q['location'] ? { location: q['location'] as string } : {}),
+      ...(q['country'] ? { country: q['country'] as string } : {}),
+      ...(q['state'] ? { state: q['state'] as string } : {}),
+      ...(q['city'] ? { city: q['city'] as string } : {}),
       ...(q['size_label'] ? { size_label: q['size_label'] as string } : {}),
     } as ArtworkFilters
 

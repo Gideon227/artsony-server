@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express'
-import { body, validationResult } from 'express-validator'
+import { body, param, validationResult } from 'express-validator'
 import { extractRequestContext } from '@/middleware/error.middleware'
 import { ValidationError } from '@/common/errors'
 import * as userService from '../services/user.service'
@@ -36,11 +36,20 @@ export const updateProfileValidation = [
     .trim()
     .isLength({ max: 500 })
     .withMessage('Bio must be at most 500 characters'),
-  body('location')
+  body('country')
+    .optional({ nullable: true, values: 'falsy' })
+    .isISO31661Alpha2()
+    .withMessage('country must be a valid ISO 3166-1 alpha-2 code'),
+  body('state')
     .optional({ nullable: true })
     .trim()
     .isLength({ max: 100 })
-    .withMessage('Location must be at most 100 characters'),
+    .withMessage('State must be at most 100 characters'),
+  body('city')
+    .optional({ nullable: true })
+    .trim()
+    .isLength({ max: 100 })
+    .withMessage('City must be at most 100 characters'),
   body('interests')
     .optional()
     .isArray({ max: MAX_ART_FOCUS })
@@ -128,9 +137,15 @@ export async function handleUpdateProfile(
       return
     }
 
+    const body = req.body as userService.UpdateProfileBody
     const user = await userService.updateProfile({
       userId: req.auth.sub,
-      input: req.body as userService.UpdateProfileBody,
+      input: {
+        ...body,
+        ...(body.country !== undefined && body.country !== null
+          ? { country: body.country.toUpperCase() }
+          : {}),
+      },
     })
 
     res.json({
@@ -180,6 +195,37 @@ export async function handleUpdatePrivacySettings(
     }
     const settings = await userService.updatePrivacySettings(req.auth.sub, req.body)
     res.json({ success: true, data: settings })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// ─── GET /api/users/:userId/permissions ────────────────────────────────────
+// Read-only preview of whether the requesting user can message/comment on/
+// purchase from :userId, given :userId's privacy settings and block status.
+// UI-only signal for showing/disabling buttons ahead of time — the real
+// enforcement stays in message.service.ts / comment.service.ts / cart.service.ts.
+
+export const getInteractionPermissionsValidation = [
+  param('userId').isUUID().withMessage('userId must be a valid UUID'),
+]
+
+export async function handleGetInteractionPermissions(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    assertValid(req)
+    if (!req.auth) {
+      res.status(401).json({ success: false, code: 'UNAUTHORIZED' })
+      return
+    }
+    const permissions = await userService.getInteractionPermissions(
+      req.auth.sub,
+      req.params['userId'] as string,
+    )
+    res.json({ success: true, data: permissions })
   } catch (err) {
     next(err)
   }

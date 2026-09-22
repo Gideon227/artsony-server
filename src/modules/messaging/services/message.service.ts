@@ -3,6 +3,8 @@ import { conversationRepository } from '../repositories/conversation.repository'
 import { broadcastService } from './broadcast.service'
 // Removed unused notificationService import to clean up
 import { blockRepository } from '@/modules/block/repositories/block.repository'
+import { userRepository } from '@/modules/auth/repositories/user.repository'
+import { isInteractionAllowed } from '@/common/utils/privacy.util'
 import { checkAndSetIdempotency } from '@/modules/redis/redis.pubsub'
 import { getRedis } from '@/modules/redis/redis.client'
 import {
@@ -55,18 +57,24 @@ export const messageService = {
         throw new ForbiddenError('Not a participant of this conversation')
         }
 
-        // A block should stop new messages even in a conversation that
-        // already existed before the block happened — getOrCreateDirect
-        // only gates conversation *creation*, so this is re-checked here
-        // for every send. Scoped to direct conversations; broadcasts are
-        // one-way announcements, not a 1:1 relationship to block.
+        // A block, or a tightened who_can_message setting, should stop new
+        // messages even in a conversation that already existed before the
+        // restriction happened — getOrCreateDirect only gates conversation
+        // *creation*, so both are re-checked here for every send. Scoped to
+        // direct conversations; broadcasts are one-way announcements, not a
+        // 1:1 relationship to block or message-privacy.
         const conversation = await conversationRepository.findById(input.conversation_id)
         if (conversation?.type === 'direct') {
         const participantIds = await conversationRepository.getParticipantIds(input.conversation_id)
         const otherId = participantIds.find((id) => id !== input.sender_id)
         if (otherId) {
-            const blocked = await blockRepository.isBlockedEitherDirection(input.sender_id, otherId)
+            const [blocked, settings] = await Promise.all([
+              blockRepository.isBlockedEitherDirection(input.sender_id, otherId),
+              userRepository.getPrivacySettings(otherId),
+            ])
             if (blocked) throw new ForbiddenError('You cannot message this user')
+            const allowed = await isInteractionAllowed(settings.who_can_message, input.sender_id, otherId)
+            if (!allowed) throw new ForbiddenError('This user limits who can message them')
         }
         }
 

@@ -13,6 +13,10 @@ export const commentService = {
     const artwork = await artworkRepository.findById(input.artwork_id)
     if (!artwork) throw new NotFoundError('Artwork')
 
+    if (!artwork.allow_comments) {
+      throw new ForbiddenError('Comments are turned off for this artwork')
+    }
+
     if (artwork.creator_id !== userId) {
       const [blocked, settings] = await Promise.all([
         blockRepository.isBlockedEitherDirection(userId, artwork.creator_id),
