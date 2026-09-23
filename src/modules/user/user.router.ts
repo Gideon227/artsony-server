@@ -9,11 +9,13 @@ import {
   handleUpdatePrivacySettings,
   handleGetInteractionPermissions,
   handleGetUsersByIds,
+  handleGetPublicProfile,
   handleSearchUsers,
   onboardingValidation,
   updateProfileValidation,
   updatePrivacySettingsValidation,
   getInteractionPermissionsValidation,
+  getPublicProfileValidation,
 } from './controllers/user.controller'
 
 const router = Router()
@@ -43,6 +45,11 @@ router.patch('/me/privacy', updatePrivacySettingsValidation, handleUpdatePrivacy
 // GET /api/users/:userId/permissions — can the requesting user message/
 // comment on/purchase from :userId, given :userId's privacy settings
 router.get('/:userId/permissions', getInteractionPermissionsValidation, handleGetInteractionPermissions)
+
+// GET /api/users/:id — another user's public profile (for PublicProfilePage).
+// Must stay registered after /me, /search, /by-ids, /me/privacy above —
+// as a single dynamic segment it would otherwise shadow any of those.
+router.get('/:id', getPublicProfileValidation, handleGetPublicProfile)
 
 // ─── Onboarding ───────────────────────────────────────────────────────────────
 

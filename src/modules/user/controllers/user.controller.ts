@@ -269,6 +269,51 @@ export async function handleGetMe(
   }
 }
 
+// GET /api/users/:id — another user's public profile. Frontend's
+// PublicProfilePage (app/(protected)/profile/[id]/page.tsx) has called this
+// since it was built; no matching route ever existed, so this was a flat
+// 404 for every profile, not just deactivated ones. sanitiseUser() alone
+// isn't enough here — it's built for /me, where returning the caller's own
+// email back to them is fine; a public profile must not include email at
+// all, so that's stripped separately below.
+export const getPublicProfileValidation = [
+  param('id').isUUID().withMessage('id must be a valid UUID'),
+]
+
+export async function handleGetPublicProfile(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const errors = validationResult(req)
+    if (!errors.isEmpty()) {
+      // Transform express-validator objects into a simple Record<string, string>
+      const formattedErrors = Object.entries(errors.mapped()).reduce((acc, [field, err]) => {
+        acc[field] = err.msg as string
+        return acc
+      }, {} as Record<string, string>)
+
+      throw new ValidationError('Validation failed', formattedErrors)
+    }
+
+    const { userRepository } = await import(
+      '@/modules/auth/repositories/user.repository.js'
+    )
+    const user = await userRepository.findByIdWithProfile(req.params['id'] as string)
+    
+    if (!user) {
+      res.status(404).json({ success: false, code: 'NOT_FOUND' })
+      return
+    }
+
+    const { email, ...publicUser } = sanitiseUser(user)
+    res.json({ success: true, data: publicUser })
+  } catch (err) {
+    next(err)
+  }
+}
+
 // ─── GET /api/users/search?q=username&limit=10 ────────────────────────────────
 export async function handleSearchUsers(
   req: Request,

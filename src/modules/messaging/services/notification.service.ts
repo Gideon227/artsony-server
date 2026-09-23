@@ -204,8 +204,23 @@ export const notificationService = {
       ? rows[rows.length - 1]!['created_at'] as string
       : null
 
+    const actorIds = Array.from(new Set(
+      rows.map((r) => r['actor_id'] as string | null).filter((id): id is string => Boolean(id))
+    ))
+    let actorsById = new Map<string, { id: string; username: string; display_name: string | null; avatar_url: string | null }>()
+    if (actorIds.length > 0) {
+      const { userRepository } = await import('@/modules/auth/repositories/user.repository.js')
+      const actors = await userRepository.findPublicProfilesByIds(actorIds)
+      actorsById = new Map(actors.map((a) => [a.id, {
+        id: a.id,
+        username: a.username,
+        display_name: a.profile?.display_name ?? null,
+        avatar_url: a.profile?.avatar_url ?? null,
+      }]))
+    }
+
     return {
-      items: rows.map(toNotification),
+      items: rows.map((row) => toNotification(row, actorsById)),
       next_cursor: nextCursor,
       has_more: hasMore,
     }
@@ -298,13 +313,18 @@ function buildPreview(body: string, maxLen = 80): string {
   return body.length > maxLen ? `${body.slice(0, maxLen).trimEnd()}…` : body
 }
 
-function toNotification(row: Record<string, unknown>) {
+function toNotification(
+  row: Record<string, unknown>,
+  actorsById: Map<string, { id: string; username: string; display_name: string | null; avatar_url: string | null }>,
+) {
+  const actorId = (row['actor_id'] as string | null) ?? null
   return {
     id:          row['id'] as string,
     type:        row['type'] as NotificationType,
     entity_id:   (row['entity_id'] as string | null) ?? null,
     entity_type: (row['entity_type'] as string | null) ?? null,
-    actor_id:    (row['actor_id'] as string | null) ?? null,
+    actor_id:    actorId,
+    actor:       actorId ? actorsById.get(actorId) ?? null : null,
     data:        (row['data'] as Record<string, unknown>) ?? {},
     is_read:     row['is_read'] as boolean,
     created_at:  new Date(row['created_at'] as string),
