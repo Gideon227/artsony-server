@@ -8,6 +8,7 @@ import {
   handleUpdateConversation,
   handleMuteConversation,
   handleLeaveConversation,
+  handleMarkUnread,
   handleSearchConversations,
   createConversationValidation,
   updateConversationValidation,
@@ -40,23 +41,24 @@ router.use(apiRateLimit)
 // Search must be registered BEFORE /:id to avoid being caught as a param route
 router.get('/search',     searchConversationsValidation, handleSearchConversations)
 
-router.get('/',           listConversationsValidation,   handleListConversations)
-router.post('/',          createConversationValidation,  handleCreateConversation)
-router.get('/:id',                                       handleGetConversation)
-router.patch('/:id',      updateConversationValidation,  handleUpdateConversation)
-router.delete('/:id',                                    handleLeaveConversation)
-router.post('/:id/mute',                                 handleMuteConversation)
+router.get('/',listConversationsValidation, handleListConversations)
+router.post('/', createConversationValidation, handleCreateConversation)
+router.get('/:id', handleGetConversation)
+router.patch('/:id', updateConversationValidation, handleUpdateConversation)
+router.delete('/:id', handleLeaveConversation)
+router.post('/:id/mute', handleMuteConversation)
+router.post('/:id/unread', handleMarkUnread)
 
 // ─── Message routes ────────────────────────────────────────────────────────────
 
 // /search within a conversation — before /:mid to avoid param collision
 router.get('/:id/messages/search',        searchMessagesValidation, handleSearchMessages)
 
-router.get('/:id/messages',               listMessagesValidation,   handleListMessages)
-router.post('/:id/messages',              sendMessageValidation,    handleSendMessage)
-router.patch('/:id/messages/:mid',        editMessageValidation,    handleEditMessage)
-router.delete('/:id/messages/:mid',                                 handleDeleteMessage)
-router.post('/:id/messages/read',         markReadValidation,       handleMarkRead)
-router.get('/:id/messages/:mid/reads',                             handleGetReadReceipts)
+router.get('/:id/messages',listMessagesValidation, handleListMessages)
+router.post('/:id/messages', sendMessageValidation, handleSendMessage)
+router.patch('/:id/messages/:mid', editMessageValidation, handleEditMessage)
+router.delete('/:id/messages/:mid', handleDeleteMessage)
+router.post('/:id/messages/read', markReadValidation, handleMarkRead)
+router.get('/:id/messages/:mid/reads', handleGetReadReceipts)
 
 export { router as messagingRouter }

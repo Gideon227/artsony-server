@@ -91,7 +91,10 @@ export function createApp() {
     res.json({ status: 'ok', ts: new Date().toISOString() })
   })
 
-  // ── Static Files ───────────────────────────────────────────────────────────
+  app.use('/uploads', (_req, res, next) => {
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+    next()
+  })
   app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')))
 
   // ── Routes ─────────────────────────────────────────────────────────────────

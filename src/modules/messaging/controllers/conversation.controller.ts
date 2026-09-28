@@ -242,6 +242,23 @@ export async function handleMuteConversation(
   }
 }
 
+// POST /api/conversations/:id/unread
+export async function handleMarkUnread(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const userId         = req.auth!.sub
+    const conversationId = req.params['id']!
+
+    await conversationService.markUnread(conversationId, userId)
+    res.json({ success: true })
+  } catch (err) {
+    next(err)
+  }
+}
+
 // DELETE /api/conversations/:id  (leave)
 export async function handleLeaveConversation(
   req: Request,

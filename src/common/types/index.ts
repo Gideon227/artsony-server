@@ -172,6 +172,7 @@ export type ConversationSummary = {
   last_activity_at:  Date
   last_message_id:   string | null
   unread_count:      number
+  is_muted:          boolean
   last_message?:     MessagePreview | null
   other_user?:       ParticipantProfile | null
 }
@@ -196,6 +197,7 @@ export type ParticipantProfile = {
   joined_at: Date
   left_at: Date | null
   email: string
+  username: string
   display_name:  string | null
   avatar_url: string | null
 }

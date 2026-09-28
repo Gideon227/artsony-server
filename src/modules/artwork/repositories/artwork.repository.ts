@@ -113,7 +113,22 @@ function pickThumbnail(assets: any): string | null {
   const list = parseJsonField<ArtworkAsset[]>(assets, [])
   if (!list.length) return null
   const primary = [...list].sort((a, b) => a.ordering_index - b.ordering_index)[0]
-  return primary?.thumbnail_url ?? primary?.optimized_url ?? primary?.original_url ?? null
+  if (!primary) return null
+
+  // `optimized_url`/`original_url` are only safe stand-ins for a thumbnail
+  // when the primary asset is itself a static image. For VIDEO/THREE_D/
+  // EXTERNAL_LINK assets those fields point at a video file, a 3D model, or
+  // an external resource — none of which a plain <img>/CSS background-image
+  // can render. Falling back to them there used to produce a "blank/black"
+  // hero slide or card whenever a video's dedicated thumbnail_url wasn't
+  // generated (e.g. an eager Cloudinary transform that didn't come back).
+  // For non-image assets, only a real thumbnail_url counts as a thumbnail —
+  // otherwise report "no thumbnail" so callers fall back to a placeholder.
+  if (primary.media_type !== 'IMAGE') {
+    return primary.thumbnail_url ?? null
+  }
+
+  return primary.thumbnail_url ?? primary.optimized_url ?? primary.original_url ?? null
 }
 
 function toFeaturedArtwork(row: any): FeaturedArtwork {

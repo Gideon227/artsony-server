@@ -147,10 +147,19 @@ export const conversationService = {
 
     const previews = await messageRepository.getPreviews(messageIds)
 
+    // Batch fetch the other participant's profile for direct conversations —
+    // powers the avatar/display name shown in the conversation list and thread header.
+    const directIds = conversations.filter((c) => c.type === 'direct').map((c) => c.id)
+    const otherUserMap = await conversationRepository.getOtherParticipants(
+      directIds,
+      input.user_id,
+    )
+
     const enriched: ConversationSummary[] = conversations.map((c) => ({
       ...c,
       unread_count: unreadMap.get(c.id) ?? 0,
       last_message: c.last_message_id ? (previews.get(c.last_message_id) ?? null) : null,
+      other_user: otherUserMap.get(c.id) ?? null,
     }))
 
     const hasMore = enriched.length === limit
@@ -181,10 +190,27 @@ export const conversationService = {
 
     const previews = await messageRepository.getPreviews(messageIds)
 
+    const directIds = results.filter((c) => c.type === 'direct').map((c) => c.id)
+    const [otherUserMap, muteMap] = await Promise.all([
+      conversationRepository.getOtherParticipants(directIds, input.user_id),
+      conversationRepository.getMyMuteStates(results.map((c) => c.id), input.user_id),
+    ])
+
     return results.map((c) => ({
       ...c,
       last_message: c.last_message_id ? (previews.get(c.last_message_id) ?? null) : null,
+      other_user: otherUserMap.get(c.id) ?? null,
+      is_muted: muteMap.get(c.id) ?? false,
     }))
+  },
+
+  // ── Mark a conversation unread for the current user ────────────────────────
+
+  async markUnread(conversationId: string, userId: string): Promise<void> {
+    const isParticipant = await conversationRepository.isParticipant(conversationId, userId)
+    if (!isParticipant) throw new ForbiddenError('Not a participant of this conversation')
+
+    await conversationRepository.markUnread(conversationId, userId)
   },
 
   // ── Update conversation title/metadata ────────────────────────────────────
