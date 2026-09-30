@@ -197,15 +197,24 @@ export async function getArtworkBySlug(
   slug: string,
   requesterId?: string,
 ): Promise<Artwork> {
-  const cached = await redisGetJson<Artwork>(RedisKeys.artworkBySlug(slug))
-  if (cached) return cached
+  // Per-user fields (is_liked / is_saved) and owner-only visibility mean only
+  // the anonymous shape may share a cache entry, same as getArtworkById.
+  if (!requesterId) {
+    const cached = await redisGetJson<Artwork>(RedisKeys.artworkBySlug(slug))
+    if (cached) {
+      enforceVisibilityRead(cached, requesterId)
+      return cached
+    }
+  }
 
-  const artwork = await artworkRepository.findBySlug(slug)
+  const artwork = await artworkRepository.findBySlug(slug, requesterId)
   if (!artwork) throw new NotFoundError('Artwork')
 
   enforceVisibilityRead(artwork, requesterId)
 
-  void redisSetJson(RedisKeys.artworkBySlug(slug), artwork, RedisTTL.artworkSingle)
+  if (!requesterId) {
+    void redisSetJson(RedisKeys.artworkBySlug(slug), artwork, RedisTTL.artworkSingle)
+  }
   return artwork
 }
 
