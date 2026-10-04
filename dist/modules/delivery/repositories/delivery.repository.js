@@ -16,6 +16,19 @@ function toToken(row) {
         created_at: new Date(row['created_at']),
     };
 }
+function toTokenWithArtwork(row) {
+    const artwork = (row['artworks'] ?? {});
+    const assets = artwork['assets'] ?? [];
+    const primaryAsset = assets.find((a) => a?.['ordering_index'] === 0) ?? assets[0];
+    return {
+        ...toToken(row),
+        artwork_title: artwork['title'] ?? 'Untitled artwork',
+        artwork_slug: artwork['slug'] ?? '',
+        artwork_thumbnail_url: primaryAsset?.['thumbnail_url']
+            ?? primaryAsset?.['original_url']
+            ?? null,
+    };
+}
 exports.deliveryRepository = {
     async create(input) {
         const result = await (0, database_1.supabase)()
@@ -59,12 +72,12 @@ exports.deliveryRepository = {
     async findByBuyer(buyerId) {
         const result = await (0, database_1.supabase)()
             .from('digital_delivery_tokens')
-            .select('*')
+            .select('*, artworks!artwork_id ( title, slug, assets )')
             .eq('buyer_id', buyerId)
             .order('created_at', { ascending: false });
         if (result.error)
             return [];
-        return (result.data ?? []).map(toToken);
+        return (result.data ?? []).map(toTokenWithArtwork);
     },
     // Atomically increments download_count and updates last_downloaded_at.
     // Returns the updated token.

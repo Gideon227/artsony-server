@@ -3,9 +3,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.tokenParamValidation = exports.downloadRateLimit = void 0;
+exports.orderItemParamValidation = exports.tokenParamValidation = exports.downloadRateLimit = void 0;
 exports.handleRedeemToken = handleRedeemToken;
 exports.handleGetMyDownloads = handleGetMyDownloads;
+exports.handleGetDownloadForOrderItem = handleGetDownloadForOrderItem;
 const express_validator_1 = require("express-validator");
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const delivery_service_1 = require("../services/delivery.service");
@@ -41,6 +42,11 @@ exports.tokenParamValidation = [
         .isLength({ min: 32, max: 200 })
         .withMessage('Invalid token format'),
 ];
+exports.orderItemParamValidation = [
+    (0, express_validator_1.param)('orderItemId')
+        .isUUID()
+        .withMessage('Invalid order item id'),
+];
 // ── Handlers ──────────────────────────────────────────────────────────────────
 // GET /api/delivery/:token
 // Validates the token, enforces guards, returns a short-lived signed URL.
@@ -67,6 +73,23 @@ async function handleGetMyDownloads(req, res, next) {
             throw new errors_1.UnauthorizedError();
         const tokens = await delivery_service_1.deliveryService.getMyDownloads(req.auth.sub);
         res.json({ success: true, data: tokens });
+    }
+    catch (err) {
+        next(err);
+    }
+}
+// GET /api/delivery/order-items/:orderItemId
+// In-app download entry point for the "My Downloads" page. Ownership is
+// verified against the authenticated session — no raw token required, so
+// this works even if the delivery email was never seen by the buyer.
+async function handleGetDownloadForOrderItem(req, res, next) {
+    try {
+        assertValid(req);
+        if (!req.auth)
+            throw new errors_1.UnauthorizedError();
+        const { orderItemId } = req.params;
+        const result = await delivery_service_1.deliveryService.getDownloadForOrderItem(orderItemId, req.auth.sub);
+        res.json({ success: true, data: result });
     }
     catch (err) {
         next(err);

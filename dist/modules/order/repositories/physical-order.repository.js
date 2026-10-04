@@ -29,6 +29,68 @@ function toPhysical(row) {
         updated_at: new Date(row['updated_at']),
     };
 }
+// Joins order_items (product snapshot — already denormalized at checkout, so
+// no separate artworks lookup is needed) and the buyer/seller's public
+// profile. Used by list endpoints only; single-item detail views go through
+// getOrderView, which has its own richer assembly.
+//
+// NOTE: `profile:profiles` is embedded off `users` with no explicit fkey
+// hint (relies on PostgREST inferring the single profiles.user_id relation),
+// matching the pattern used elsewhere in this codebase (see artwork
+// repository's CREATOR_EMBED). `username` is read from the profile embed,
+// not from `users` directly — per the schema in 001_initial_schema.sql,
+// `users` has no `username` column; only `profiles.username` does.
+const PHYSICAL_LIST_EMBED = `
+  *,
+  order_item:order_items!order_item_physical_order_item_id_fkey (
+    artwork_id,
+    artwork_title,
+    artwork_slug,
+    artwork_thumbnail_url,
+    unit_price,
+    quantity,
+    seller:users!order_items_seller_id_fkey (
+      id,
+      profile:profiles ( username, display_name, avatar_url )
+    )
+  ),
+  order:orders!order_item_physical_order_id_fkey (
+    order_number,
+    buyer:users!orders_buyer_id_fkey (
+      id,
+      profile:profiles ( username, display_name, avatar_url )
+    )
+  )
+`;
+function toPartySummary(userRow) {
+    if (!userRow)
+        return null;
+    const profile = Array.isArray(userRow.profile) ? (userRow.profile[0] ?? null) : (userRow.profile ?? null);
+    return {
+        id: userRow.id,
+        username: profile?.username ?? null,
+        display_name: profile?.display_name ?? null,
+        avatar_url: profile?.avatar_url ?? null,
+    };
+}
+function toPhysicalListEntry(row) {
+    const orderItem = Array.isArray(row.order_item) ? row.order_item[0] : row.order_item;
+    const order = Array.isArray(row.order) ? row.order[0] : row.order;
+    return {
+        ...toPhysical(row),
+        order_number: order?.order_number ?? null,
+        order_item: {
+            artwork_id: orderItem?.artwork_id ?? '',
+            artwork_title: orderItem?.artwork_title ?? 'Untitled artwork',
+            artwork_slug: orderItem?.artwork_slug ?? '',
+            artwork_thumbnail_url: orderItem?.artwork_thumbnail_url ?? null,
+            unit_price: orderItem?.unit_price != null ? Number(orderItem.unit_price) : 0,
+            quantity: orderItem?.quantity ?? 1,
+        },
+        buyer: toPartySummary(order?.buyer),
+        seller: toPartySummary(orderItem?.seller),
+    };
+}
 function toTimelineEvent(row) {
     return {
         id: row['id'],
@@ -514,7 +576,7 @@ exports.physicalOrderRepository = {
         }
         let query = (0, database_1.supabase)()
             .from('order_item_physical')
-            .select('*', { count: 'exact' });
+            .select(PHYSICAL_LIST_EMBED, { count: 'exact' });
         if (scopedOrderItemIds)
             query = query.in('order_item_id', scopedOrderItemIds);
         if (scopedOrderIds)
@@ -545,7 +607,7 @@ exports.physicalOrderRepository = {
         const total = result.count ?? 0;
         const total_pages = Math.ceil(total / limit);
         return {
-            data: (result.data ?? []).map(toPhysical),
+            data: (result.data ?? []).map(toPhysicalListEntry),
             total,
             page,
             limit,
@@ -576,7 +638,7 @@ exports.physicalOrderRepository = {
         }
         let query = (0, database_1.supabase)()
             .from('order_item_physical')
-            .select('*', { count: 'exact' })
+            .select(PHYSICAL_LIST_EMBED, { count: 'exact' })
             .in('order_item_id', sellerItemIds);
         if (filters.delivery_status)
             query = query.eq('delivery_status', filters.delivery_status);
@@ -600,7 +662,7 @@ exports.physicalOrderRepository = {
         const total = result.count ?? 0;
         const total_pages = Math.ceil(total / limit);
         return {
-            data: (result.data ?? []).map(toPhysical),
+            data: (result.data ?? []).map(toPhysicalListEntry),
             total,
             page,
             limit,
@@ -630,7 +692,7 @@ exports.physicalOrderRepository = {
         }
         let query = (0, database_1.supabase)()
             .from('order_item_physical')
-            .select('*', { count: 'exact' })
+            .select(PHYSICAL_LIST_EMBED, { count: 'exact' })
             .in('order_id', buyerOrderIds);
         if (filters.delivery_status)
             query = query.eq('delivery_status', filters.delivery_status);
@@ -652,7 +714,7 @@ exports.physicalOrderRepository = {
         const total = result.count ?? 0;
         const total_pages = Math.ceil(total / limit);
         return {
-            data: (result.data ?? []).map(toPhysical),
+            data: (result.data ?? []).map(toPhysicalListEntry),
             total,
             page,
             limit,

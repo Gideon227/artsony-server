@@ -30,6 +30,7 @@ export const RedisTTL = {
   oauthState: 60 * 10,           // 10 min
   loginAttempts: 60 * 30,           // 30 min lockout window
   rtBlacklist: 60 * 60 * 24 * 30, // match refresh token lifetime
+  rtGraceWindow: 10,                 // 10s — legitimate concurrent refresh reuse (multi-tab) vs. real replay
 
   // Artwork
   artworkSingle: 60 * 5,            // 5 min — individual artwork
@@ -77,6 +78,7 @@ export const RedisKeys = {
   // Auth  
   session: (sessionId: string) => `auth:session:${sessionId}`,
   rtBlacklist: (tokenHash: string) => `auth:rt:blacklist:${tokenHash}`,
+  rtGrace: (tokenHash: string) => `auth:rt:grace:${tokenHash}`,
   loginAttempts: (email: string) => `auth:attempts:login:${encodeURIComponent(email)}`,
   resetAttempts: (email: string) => `auth:attempts:reset:${encodeURIComponent(email)}`,
   lockout: (email: string) => `auth:lockout:${encodeURIComponent(email)}`,

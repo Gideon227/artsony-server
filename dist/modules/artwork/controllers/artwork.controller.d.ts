@@ -5,6 +5,8 @@ export declare const flagArtworkValidation: import("express-validator").Validati
 export declare const listArtworksValidation: import("express-validator").ValidationChain[];
 export declare function handleCreateArtwork(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleGetArtwork(req: Request, res: Response, next: NextFunction): Promise<void>;
+export declare const trackViewValidation: import("express-validator").ValidationChain[];
+export declare function handleTrackView(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleToggleLike(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleGetArtworkBySlug(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare const getFeedValidation: import("express-validator").ValidationChain[];
@@ -13,7 +15,10 @@ export declare const featuredArtworksValidation: import("express-validator").Val
 export declare function handleGetFeaturedArtworks(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare const getTopPicksValidation: import("express-validator").ValidationChain[];
 export declare function handleGetTopPicks(req: Request, res: Response, next: NextFunction): Promise<void>;
-export declare function handleGetLocations(_req: Request, res: Response, next: NextFunction): Promise<void>;
+export declare const getTrendingValidation: import("express-validator").ValidationChain[];
+export declare function handleGetTrending(req: Request, res: Response, next: NextFunction): Promise<void>;
+export declare const getLocationsValidation: import("express-validator").ValidationChain[];
+export declare function handleGetLocations(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleGetSizeLabels(_req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleListArtworks(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleUpdateArtwork(req: Request, res: Response, next: NextFunction): Promise<void>;

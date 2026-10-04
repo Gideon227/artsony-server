@@ -33,13 +33,15 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resetPasswordValidation = exports.forgotPasswordValidation = exports.loginValidation = exports.registerValidation = void 0;
+exports.changePasswordValidation = exports.resetPasswordValidation = exports.forgotPasswordValidation = exports.loginValidation = exports.registerValidation = void 0;
 exports.handleRegister = handleRegister;
 exports.handleLogin = handleLogin;
 exports.handleRefresh = handleRefresh;
 exports.handleLogout = handleLogout;
 exports.handleForgotPassword = handleForgotPassword;
 exports.handleResetPassword = handleResetPassword;
+exports.handleChangePassword = handleChangePassword;
+exports.handleDeactivateAccount = handleDeactivateAccount;
 exports.handleDeleteAccount = handleDeleteAccount;
 exports.handleMe = handleMe;
 exports.handleOAuthCallback = handleOAuthCallback;
@@ -48,6 +50,23 @@ const authService = __importStar(require("../services/auth.service"));
 const error_middleware_1 = require("../../../middleware/error.middleware");
 const config_1 = require("../../../config");
 const errors_1 = require("../../../common/errors");
+const sanitise_user_1 = require("../../../common/utils/sanitise-user");
+// Profile enrichment (joining the profiles table for display_name/avatar/
+// social links/etc.) must never be able to break the core auth flow —
+// login, register, and /me all need to keep working even if that join
+// fails for some reason (e.g. a pending migration, a transient DB issue).
+// Falls back to the bare user row, which sanitiseUser can still handle.
+async function withProfileOrFallback(user) {
+    try {
+        const { userRepository } = await import('../repositories/user.repository.js');
+        const fullUser = await userRepository.findByIdWithProfile(user.id);
+        return fullUser ?? user;
+    }
+    catch (err) {
+        console.error('[Auth] Profile enrichment failed, falling back to bare user:', err);
+        return user;
+    }
+}
 const REFRESH_COOKIE = 'artsony_rt';
 // Cookie helpers
 function setRefreshCookie(res, token) {
@@ -114,7 +133,7 @@ async function handleRegister(req, res, next) {
             success: true,
             data: {
                 accessToken: tokens.accessToken,
-                user: sanitiseUser(user),
+                user: (0, sanitise_user_1.sanitiseUser)(await withProfileOrFallback(user)),
             },
         });
     }
@@ -133,7 +152,7 @@ async function handleLogin(req, res, next) {
             success: true,
             data: {
                 accessToken: tokens.accessToken,
-                user: sanitiseUser(user),
+                user: (0, sanitise_user_1.sanitiseUser)(await withProfileOrFallback(user)),
             },
         });
     }
@@ -204,6 +223,45 @@ async function handleResetPassword(req, res, next) {
         next(err);
     }
 }
+exports.changePasswordValidation = [
+    (0, express_validator_1.body)('currentPassword').isString().notEmpty().withMessage('Current password is required'),
+    (0, express_validator_1.body)('newPassword').isLength({ min: 8, max: 128 }),
+];
+async function handleChangePassword(req, res, next) {
+    try {
+        assertValid(req);
+        if (!req.auth) {
+            res.status(401).json({ success: false });
+            return;
+        }
+        const { currentPassword, newPassword } = req.body;
+        const ctx = (0, error_middleware_1.extractRequestContext)(req);
+        await authService.changePassword({ userId: req.auth.sub, currentPassword, newPassword, ctx });
+        // Sessions were just revoked (including this one) — clear the refresh
+        // cookie so the client doesn't retain a dead one, same as delete/logout.
+        clearRefreshCookie(res);
+        res.json({ success: true, message: 'Password changed. Please sign in again.' });
+    }
+    catch (err) {
+        next(err);
+    }
+}
+async function handleDeactivateAccount(req, res, next) {
+    try {
+        if (!req.auth) {
+            res.status(401).json({ success: false });
+            return;
+        }
+        const { password } = req.body;
+        const ctx = (0, error_middleware_1.extractRequestContext)(req);
+        await authService.deactivateAccount({ userId: req.auth.sub, ...(password !== undefined && { password }), ctx });
+        clearRefreshCookie(res);
+        res.json({ success: true, message: 'Account deactivated. Log back in anytime to reactivate.' });
+    }
+    catch (err) {
+        next(err);
+    }
+}
 async function handleDeleteAccount(req, res, next) {
     try {
         if (!req.auth) {
@@ -232,7 +290,7 @@ async function handleMe(req, res, next) {
             res.status(404).json({ success: false });
             return;
         }
-        res.json({ success: true, data: sanitiseUser(user) });
+        res.json({ success: true, data: (0, sanitise_user_1.sanitiseUser)(await withProfileOrFallback(user)) });
     }
     catch (err) {
         next(err);
@@ -262,10 +320,5 @@ async function handleOAuthCallback(req, res, next) {
     catch (err) {
         next(err);
     }
-}
-// ─── Sanitise user before sending to client ───────────────────────────────────
-function sanitiseUser(user) {
-    const { password_hash, token_version, failed_login_attempts, locked_until, ...safe } = user;
-    return safe;
 }
 //# sourceMappingURL=auth.controller.js.map

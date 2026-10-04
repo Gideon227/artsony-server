@@ -24,6 +24,12 @@ export declare const notificationService: {
             entity_id: string | null;
             entity_type: string | null;
             actor_id: string | null;
+            actor: {
+                id: string;
+                username: string;
+                display_name: string | null;
+                avatar_url: string | null;
+            } | null;
             data: Record<string, unknown>;
             is_read: boolean;
             created_at: Date;
@@ -34,5 +40,12 @@ export declare const notificationService: {
     markRead(notificationId: string, userId: string): Promise<void>;
     markAllRead(userId: string): Promise<void>;
     getUnreadCount(userId: string): Promise<number>;
+    getPreferences(userId: string): Promise<import("../../../common/types").NotificationPreferences>;
+    updatePreferences(userId: string, changes: Partial<{
+        push_enabled: boolean;
+        email_enabled: boolean;
+        ws_enabled: boolean;
+        types_muted: NotificationType[];
+    }>): Promise<import("../../../common/types").NotificationPreferences>;
 };
 //# sourceMappingURL=notification.service.d.ts.map

@@ -5,13 +5,24 @@ const message_repository_1 = require("../repositories/message.repository");
 const conversation_repository_1 = require("../repositories/conversation.repository");
 const broadcast_service_1 = require("./broadcast.service");
 // Removed unused notificationService import to clean up
+const block_repository_1 = require("../../../modules/block/repositories/block.repository");
+const user_repository_1 = require("../../../modules/auth/repositories/user.repository");
+const privacy_util_1 = require("../../../common/utils/privacy.util");
 const redis_pubsub_1 = require("../../../modules/redis/redis.pubsub");
 const redis_client_1 = require("../../../modules/redis/redis.client");
 const errors_1 = require("../../../common/errors");
 exports.messageService = {
     // ── Send a message ────────────────────────────────────────────────────────
     async send(input) {
-        // ── Idempotency check ──────────────────────────────────────────────────
+        // ── Idempotency fast path ────────────────────────────────────────────────
+        // Redis check-and-set. This is a best-effort optimization that avoids a
+        // DB round trip for the common "double-tapped send" case — it is NOT the
+        // source of correctness. There is a window between the initial 'pending'
+        // SET NX below and the later update to the real message id (after
+        // persistence) where a concurrent duplicate request can also observe
+        // 'pending' and fall through past this check. The actual guarantee
+        // against a duplicate row ever being created is the UNIQUE index on
+        // messages.client_message_id, enforced in messageRepository.create().
         const { isDuplicate, existingId } = await (0, redis_pubsub_1.checkAndSetIdempotency)(input.client_message_id, 'pending');
         if (isDuplicate && existingId && existingId !== 'pending') {
             const existing = await message_repository_1.messageRepository.findByIdWithSender(existingId);
@@ -22,6 +33,28 @@ exports.messageService = {
         const isParticipant = await conversation_repository_1.conversationRepository.isParticipant(input.conversation_id, input.sender_id);
         if (!isParticipant) {
             throw new errors_1.ForbiddenError('Not a participant of this conversation');
+        }
+        // A block, or a tightened who_can_message setting, should stop new
+        // messages even in a conversation that already existed before the
+        // restriction happened — getOrCreateDirect only gates conversation
+        // *creation*, so both are re-checked here for every send. Scoped to
+        // direct conversations; broadcasts are one-way announcements, not a
+        // 1:1 relationship to block or message-privacy.
+        const conversation = await conversation_repository_1.conversationRepository.findById(input.conversation_id);
+        if (conversation?.type === 'direct') {
+            const participantIds = await conversation_repository_1.conversationRepository.getParticipantIds(input.conversation_id);
+            const otherId = participantIds.find((id) => id !== input.sender_id);
+            if (otherId) {
+                const [blocked, settings] = await Promise.all([
+                    block_repository_1.blockRepository.isBlockedEitherDirection(input.sender_id, otherId),
+                    user_repository_1.userRepository.getPrivacySettings(otherId),
+                ]);
+                if (blocked)
+                    throw new errors_1.ForbiddenError('You cannot message this user');
+                const allowed = await (0, privacy_util_1.isInteractionAllowed)(settings.who_can_message, input.sender_id, otherId);
+                if (!allowed)
+                    throw new errors_1.ForbiddenError('This user limits who can message them');
+            }
         }
         // ── Validate reply target ──────────────────────────────────────────────
         if (input.reply_to_id) {
@@ -34,13 +67,14 @@ exports.messageService = {
             }
         }
         // ── Persist ────────────────────────────────────────────────────────────
-        const message = await message_repository_1.messageRepository.create({
+        const { message, deduped } = await message_repository_1.messageRepository.create({
             conversationId: input.conversation_id,
             senderId: input.sender_id,
             body: input.body,
             type: input.type ?? 'text',
             replyToId: input.reply_to_id ?? null,
             metadata: input.metadata ?? {},
+            clientMessageId: input.client_message_id,
         });
         // Update idempotency key with the real message id now that it's persisted
         await (0, redis_client_1.getRedis)().set(`artsony:msg:idem:${input.client_message_id}`, message.id, 'EX', 86_400);
@@ -48,6 +82,11 @@ exports.messageService = {
         const withSender = await message_repository_1.messageRepository.findByIdWithSender(message.id);
         if (!withSender)
             throw new Error('Message hydration failed after insert');
+        // A concurrent duplicate request already won the insert race and fanned
+        // this message out — skip re-broadcasting/re-notifying so recipients and
+        // the sender's other devices don't see/hear it twice.
+        if (deduped)
+            return withSender;
         // ── Fan-out delivery ───────────────────────────────────────────────────
         await broadcast_service_1.broadcastService.fanOutMessage(withSender, input.client_message_id);
         return withSender;

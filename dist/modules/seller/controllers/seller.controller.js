@@ -33,10 +33,11 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.handleReactivate = exports.handleSuspend = exports.handleReject = exports.handleApprove = exports.listFiltersValidation = exports.reviewNotesValidation = exports.idParamValidation = exports.updateRegistrationValidation = exports.submitRegistrationValidation = void 0;
+exports.handleReactivate = exports.handleSuspend = exports.handleReject = exports.handleApprove = exports.listFiltersValidation = exports.reviewNotesValidation = exports.idParamValidation = exports.updateDispatchAddressValidation = exports.updateRegistrationValidation = exports.submitRegistrationValidation = void 0;
 exports.handleSubmitRegistration = handleSubmitRegistration;
 exports.handleGetMyRegistration = handleGetMyRegistration;
 exports.handleUpdateMyRegistration = handleUpdateMyRegistration;
+exports.handleUpdateDispatchAddress = handleUpdateDispatchAddress;
 exports.handleAdminList = handleAdminList;
 exports.handleAdminGetById = handleAdminGetById;
 const express_validator_1 = require("express-validator");
@@ -82,6 +83,13 @@ exports.updateRegistrationValidation = [
     (0, express_validator_1.body)('full_name').optional().isString().trim().isLength({ min: 1, max: 150 }),
     (0, express_validator_1.body)('username').optional().isString().trim().isLength({ min: 3, max: 30 }),
     (0, express_validator_1.body)('email').optional().isEmail().normalizeEmail().trim(),
+    (0, express_validator_1.body)('phone_number').optional().isString().trim().isLength({ min: 5, max: 30 }),
+    (0, express_validator_1.body)('address').optional().isString().trim().isLength({ min: 1, max: 300 }),
+    (0, express_validator_1.body)('state').optional().isString().trim().isLength({ min: 1, max: 120 }),
+    (0, express_validator_1.body)('country').optional().isString().trim().isLength({ min: 2, max: 2 }),
+    (0, express_validator_1.body)('postal_code').optional().isString().trim().isLength({ max: 30 }),
+];
+exports.updateDispatchAddressValidation = [
     (0, express_validator_1.body)('phone_number').optional().isString().trim().isLength({ min: 5, max: 30 }),
     (0, express_validator_1.body)('address').optional().isString().trim().isLength({ min: 1, max: 300 }),
     (0, express_validator_1.body)('state').optional().isString().trim().isLength({ min: 1, max: 120 }),
@@ -153,6 +161,26 @@ async function handleUpdateMyRegistration(req, res, next) {
             ...(payload['postal_code'] !== undefined ? { postal_code: String(payload['postal_code']).trim() } : {}),
         };
         const registration = await sellerService.updateMyRegistration(req.auth.sub, input);
+        res.json({ success: true, data: registration });
+    }
+    catch (err) {
+        next(err);
+    }
+}
+async function handleUpdateDispatchAddress(req, res, next) {
+    try {
+        assertValid(req);
+        if (!req.auth)
+            throw new errors_1.UnauthorizedError();
+        const payload = req.body;
+        const input = {
+            ...(payload['phone_number'] !== undefined ? { phone_number: String(payload['phone_number']).trim() } : {}),
+            ...(payload['address'] !== undefined ? { address: String(payload['address']).trim() } : {}),
+            ...(payload['state'] !== undefined ? { state: String(payload['state']).trim() } : {}),
+            ...(payload['country'] !== undefined ? { country: String(payload['country']).trim().toUpperCase() } : {}),
+            ...(payload['postal_code'] !== undefined ? { postal_code: String(payload['postal_code']).trim() } : {}),
+        };
+        const registration = await sellerService.updateDispatchAddress(req.auth.sub, input);
         res.json({ success: true, data: registration });
     }
     catch (err) {

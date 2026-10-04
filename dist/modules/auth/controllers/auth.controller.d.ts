@@ -9,6 +9,9 @@ export declare function handleRefresh(req: Request, res: Response, next: NextFun
 export declare function handleLogout(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleForgotPassword(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleResetPassword(req: Request, res: Response, next: NextFunction): Promise<void>;
+export declare const changePasswordValidation: import("express-validator").ValidationChain[];
+export declare function handleChangePassword(req: Request, res: Response, next: NextFunction): Promise<void>;
+export declare function handleDeactivateAccount(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleDeleteAccount(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleMe(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleOAuthCallback(req: Request, res: Response, next: NextFunction): Promise<void>;

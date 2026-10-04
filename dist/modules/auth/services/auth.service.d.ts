@@ -57,5 +57,16 @@ export declare function deleteAccount(input: {
     password?: string;
     ctx: AuthContext;
 }): Promise<void>;
+export declare function changePassword(input: {
+    userId: string;
+    currentPassword: string;
+    newPassword: string;
+    ctx: AuthContext;
+}): Promise<void>;
+export declare function deactivateAccount(input: {
+    userId: string;
+    password?: string;
+    ctx: AuthContext;
+}): Promise<void>;
 export {};
 //# sourceMappingURL=auth.service.d.ts.map

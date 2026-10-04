@@ -7,6 +7,7 @@ exports.handleSearchConversations = handleSearchConversations;
 exports.handleGetConversation = handleGetConversation;
 exports.handleUpdateConversation = handleUpdateConversation;
 exports.handleMuteConversation = handleMuteConversation;
+exports.handleMarkUnread = handleMarkUnread;
 exports.handleLeaveConversation = handleLeaveConversation;
 const express_validator_1 = require("express-validator");
 const conversation_service_1 = require("../services/conversation.service");
@@ -186,6 +187,18 @@ async function handleMuteConversation(req, res, next) {
         const conversationId = req.params['id'];
         const muted = req.body['muted'] === true;
         await conversation_service_1.conversationService.setMuted(conversationId, userId, muted);
+        res.json({ success: true });
+    }
+    catch (err) {
+        next(err);
+    }
+}
+// POST /api/conversations/:id/unread
+async function handleMarkUnread(req, res, next) {
+    try {
+        const userId = req.auth.sub;
+        const conversationId = req.params['id'];
+        await conversation_service_1.conversationService.markUnread(conversationId, userId);
         res.json({ success: true });
     }
     catch (err) {

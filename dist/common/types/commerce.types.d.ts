@@ -174,6 +174,11 @@ export type DigitalDeliveryToken = {
     last_downloaded_at: Date | null;
     created_at: Date;
 };
+export type DigitalDeliveryTokenWithArtwork = DigitalDeliveryToken & {
+    artwork_title: string;
+    artwork_slug: string;
+    artwork_thumbnail_url: string | null;
+};
 export type Transaction = {
     id: string;
     order_id: string;
@@ -267,6 +272,25 @@ export type OrderItemPhysical = {
     delivered_at: Date | null;
     created_at: Date;
     updated_at: Date;
+};
+export type OrderPartySummary = {
+    id: string;
+    username: string | null;
+    display_name: string | null;
+    avatar_url: string | null;
+};
+export type OrderItemPhysicalListEntry = OrderItemPhysical & {
+    order_number: string | null;
+    order_item: {
+        artwork_id: string;
+        artwork_title: string;
+        artwork_slug: string;
+        artwork_thumbnail_url: string | null;
+        unit_price: number;
+        quantity: number;
+    };
+    buyer: OrderPartySummary | null;
+    seller: OrderPartySummary | null;
 };
 export type OrderTimelineEvent = {
     id: string;

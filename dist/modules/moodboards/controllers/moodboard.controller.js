@@ -150,8 +150,10 @@ async function handleRemoveArtwork(req, res, next) {
 }
 async function handleGetMoodboard(req, res, next) {
     try {
+        if (!req.auth)
+            throw new errors_1.UnauthorizedError();
         const { id } = req.params;
-        const moodboard = await moodboardService.getMoodboard(id);
+        const moodboard = await moodboardService.getMoodboard(id, req.auth.sub);
         res.json({ success: true, data: moodboard });
     }
     catch (err) {

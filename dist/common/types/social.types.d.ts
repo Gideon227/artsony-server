@@ -41,4 +41,15 @@ export type FollowFilters = {
     page?: number | undefined;
     limit?: number | undefined;
 };
+export type BlockedUser = {
+    id: string;
+    username: string;
+    display_name: string | null;
+    avatar_url: string | null;
+    blocked_at: Date;
+};
+export type BlockFilters = {
+    page?: number | undefined;
+    limit?: number | undefined;
+};
 //# sourceMappingURL=social.types.d.ts.map

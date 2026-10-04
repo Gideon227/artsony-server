@@ -79,14 +79,53 @@ exports.deliveryService = {
         if (tokenRecord.buyer_id !== requesterId) {
             throw new errors_1.ForbiddenError();
         }
+        const result = await this._redeem(tokenRecord);
+        // Invalidate cache so the next request sees the updated download count
+        void (0, redis_client_1.redisDel)(redis_client_1.RedisKeys.deliveryToken(tokenHash));
+        return result;
+    },
+    // ── getDownloadForOrderItem ───────────────────────────────────────────────
+    // In-app download entry point for an authenticated buyer, used by the
+    // "My Downloads" page. Unlike validateAndRedeem (which trusts a
+    // bearer-style raw token — the right model for an out-of-band context
+    // like an email link), this trusts the caller's authenticated session and
+    // verifies ownership directly against order_item_id. It does not require
+    // the one-time raw token to have survived email delivery, so it remains
+    // usable even if the delivery email bounced, landed in spam, or was
+    // deleted. Both paths share the same underlying accounting (download
+    // count, expiry, max downloads) since they operate on the same
+    // digital_delivery_tokens row.
+    async getDownloadForOrderItem(orderItemId, requesterId) {
+        const tokenRecord = await delivery_repository_1.deliveryRepository.findByOrderItem(orderItemId);
+        if (!tokenRecord) {
+            throw new errors_1.AppError('Download not available for this item', 404, 'DOWNLOAD_NOT_FOUND');
+        }
+        if (tokenRecord.buyer_id !== requesterId) {
+            throw new errors_1.ForbiddenError();
+        }
+        const result = await this._redeem(tokenRecord);
+        void (0, redis_client_1.redisDel)(redis_client_1.RedisKeys.deliveryToken(tokenRecord.token_hash));
+        return result;
+    },
+    // ── getMyDownloads ────────────────────────────────────────────────────────
+    // Returns all active download tokens for the authenticated buyer.
+    async getMyDownloads(buyerId) {
+        return delivery_repository_1.deliveryRepository.findByBuyer(buyerId);
+    },
+    // ── _redeem ────────────────────────────────────────────────────────────────
+    // Internal: shared guard + delivery logic for both access paths above.
+    // Enforces expiry and the per-token download cap, resolves the artwork's
+    // primary asset, records the download, and returns a short-lived signed
+    // Cloudinary URL. Caller is responsible for the ownership check specific
+    // to its access path (bearer token vs. session ownership) before calling
+    // this — this only enforces guards that apply regardless of access path.
+    async _redeem(tokenRecord) {
         if (new Date() > new Date(tokenRecord.expires_at)) {
-            void (0, redis_client_1.redisDel)(redis_client_1.RedisKeys.deliveryToken(tokenHash));
             throw new errors_1.AppError('This download link has expired', 410, 'DOWNLOAD_TOKEN_EXPIRED');
         }
         if (tokenRecord.download_count >= tokenRecord.max_downloads) {
             throw new errors_1.AppError(`Download limit reached (${tokenRecord.max_downloads} downloads maximum)`, 429, 'DOWNLOAD_LIMIT_REACHED');
         }
-        // const { supabase } = await import('../../../config/database')
         const artworkResult = await (0, database_1.supabase)()
             .from('artworks')
             .select('assets, title, slug')
@@ -101,8 +140,6 @@ exports.deliveryService = {
             throw new errors_1.AppError('Digital file is not available', 404, 'DIGITAL_FILE_NOT_FOUND');
         }
         await delivery_repository_1.deliveryRepository.recordDownload(tokenRecord.id);
-        // Invalidate cache so next request sees the updated download count
-        void (0, redis_client_1.redisDel)(redis_client_1.RedisKeys.deliveryToken(tokenHash));
         const urlExpiry = Math.floor(Date.now() / 1000) + SIGNED_URL_TTL_SEC;
         const signedUrl = buildSignedCloudinaryUrl(primaryAsset['original_url'], urlExpiry);
         const filename = `${artworkResult.data['slug']}-artsony.${primaryAsset['mime_type']?.split('/')[1] ?? 'jpg'}`;
@@ -111,11 +148,6 @@ exports.deliveryService = {
             filename,
             expires_at: new Date(urlExpiry * 1000),
         };
-    },
-    // ── getMyDownloads ────────────────────────────────────────────────────────
-    // Returns all active download tokens for the authenticated buyer.
-    async getMyDownloads(buyerId) {
-        return delivery_repository_1.deliveryRepository.findByBuyer(buyerId);
     },
     // ── _issueToken ───────────────────────────────────────────────────────────
     // Internal: generates a cryptographically secure raw token, hashes it

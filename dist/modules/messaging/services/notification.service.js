@@ -4,6 +4,7 @@ exports.notificationService = void 0;
 const database_1 = require("../../../config/database");
 const connection_manager_1 = require("../../../modules/ws/connection-manager");
 const redis_client_1 = require("../../../modules/redis/redis.client");
+const notification_preferences_repository_1 = require("../repositories/notification-preferences.repository");
 // ─── NotificationService ──────────────────────────────────────────────────────
 // Owns all notification creation and delivery.
 // Extends the existing notifications table (001_initial_schema.sql) with the
@@ -16,7 +17,16 @@ exports.notificationService = {
         if (input.recipientIds.length === 0)
             return;
         const type = input.message.is_broadcast_root ? 'broadcast' : 'message';
-        const rows = input.recipientIds.map((recipientId) => ({
+        // Per-recipient mute check — a recipient who has muted 'message' (or
+        // 'broadcast') shouldn't get a notification row created for them at
+        // all, not just a suppressed delivery. Fetched per-recipient since
+        // each has their own preferences; recipientIds lists are typically
+        // small (a single DM partner, or a bounded broadcast audience).
+        const flagsByRecipient = new Map(await Promise.all(input.recipientIds.map(async (id) => [id, await notification_preferences_repository_1.notificationPreferencesRepository.getEnforcementFlags(id)])));
+        const eligibleRecipientIds = input.recipientIds.filter((id) => !flagsByRecipient.get(id)?.types_muted.includes(type));
+        if (eligibleRecipientIds.length === 0)
+            return;
+        const rows = eligibleRecipientIds.map((recipientId) => ({
             recipient_id: recipientId,
             actor_id: input.message.sender_id,
             type,
@@ -40,8 +50,14 @@ exports.notificationService = {
         // Increment unread badge count in Redis for each recipient
         // and deliver a WS notification:new event to any instance where
         // the recipient might have connected in the meantime.
-        await Promise.allSettled(input.recipientIds.map(async (recipientId) => {
+        await Promise.allSettled(eligibleRecipientIds.map(async (recipientId) => {
             await (0, redis_client_1.getRedis)().incr(`artsony:notif:${recipientId}:unread`);
+            // ws_enabled gates real-time delivery specifically — the
+            // notification row and badge count above still apply either way,
+            // since the recipient should still see it when they check their
+            // notification list, just not get a live push.
+            if (flagsByRecipient.get(recipientId)?.ws_enabled === false)
+                return;
             const wsPayload = {
                 id: '', // not critical for real-time display
                 type,
@@ -69,6 +85,9 @@ exports.notificationService = {
     // Used by other services (like/comment/follow — out of scope for this
     // feature but leaving the hook here so the pattern is established).
     async create(input) {
+        const flags = await notification_preferences_repository_1.notificationPreferencesRepository.getEnforcementFlags(input.recipientId);
+        if (flags.types_muted.includes(input.type))
+            return;
         const { error, data } = await (0, database_1.supabase)()
             .from('notifications')
             .insert({
@@ -88,6 +107,10 @@ exports.notificationService = {
         }
         // Increment Redis badge
         await (0, redis_client_1.getRedis)().incr(`artsony:notif:${input.recipientId}:unread`);
+        // ws_enabled gates real-time delivery only — the row and badge above
+        // still apply, so the recipient sees it next time they check.
+        if (!flags.ws_enabled)
+            return;
         // Deliver via WS
         const wsPayload = {
             id: data.id,
@@ -129,8 +152,20 @@ exports.notificationService = {
         const nextCursor = hasMore && rows.length > 0
             ? rows[rows.length - 1]['created_at']
             : null;
+        const actorIds = Array.from(new Set(rows.map((r) => r['actor_id']).filter((id) => Boolean(id))));
+        let actorsById = new Map();
+        if (actorIds.length > 0) {
+            const { userRepository } = await import('../../../modules/auth/repositories/user.repository.js');
+            const actors = await userRepository.findPublicProfilesByIds(actorIds);
+            actorsById = new Map(actors.map((a) => [a.id, {
+                    id: a.id,
+                    username: a.username,
+                    display_name: a.profile?.display_name ?? null,
+                    avatar_url: a.profile?.avatar_url ?? null,
+                }]));
+        }
         return {
-            items: rows.map(toNotification),
+            items: rows.map((row) => toNotification(row, actorsById)),
             next_cursor: nextCursor,
             has_more: hasMore,
         };
@@ -185,18 +220,27 @@ exports.notificationService = {
         await (0, redis_client_1.getRedis)().setex(`artsony:notif:${userId}:unread`, 300, String(total));
         return total;
     },
+    // ── Preferences ────────────────────────────────────────────────────────────
+    async getPreferences(userId) {
+        return notification_preferences_repository_1.notificationPreferencesRepository.get(userId);
+    },
+    async updatePreferences(userId, changes) {
+        return notification_preferences_repository_1.notificationPreferencesRepository.update(userId, changes);
+    },
 };
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function buildPreview(body, maxLen = 80) {
     return body.length > maxLen ? `${body.slice(0, maxLen).trimEnd()}…` : body;
 }
-function toNotification(row) {
+function toNotification(row, actorsById) {
+    const actorId = row['actor_id'] ?? null;
     return {
         id: row['id'],
         type: row['type'],
         entity_id: row['entity_id'] ?? null,
         entity_type: row['entity_type'] ?? null,
-        actor_id: row['actor_id'] ?? null,
+        actor_id: actorId,
+        actor: actorId ? actorsById.get(actorId) ?? null : null,
         data: row['data'] ?? {},
         is_read: row['is_read'],
         created_at: new Date(row['created_at']),

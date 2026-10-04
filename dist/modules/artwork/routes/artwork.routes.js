@@ -15,9 +15,10 @@ router.use(rate_limit_middleware_1.apiRateLimit);
 // throws — guests can browse public artworks without a token.
 router.get('/feed', artwork_controller_1.getFeedValidation, auth_middleware_1.optionalAuth, artwork_controller_1.handleGetFeed);
 router.get('/top-picks', artwork_controller_1.getTopPicksValidation, artwork_controller_1.handleGetTopPicks);
+router.get('/trending', artwork_controller_1.getTrendingValidation, artwork_controller_1.handleGetTrending);
 router.get('/featured', artwork_controller_1.featuredArtworksValidation, artwork_controller_1.handleGetFeaturedArtworks);
 router.get('/size-labels', artwork_controller_1.handleGetSizeLabels);
-router.get('/locations', artwork_controller_1.handleGetLocations);
+router.get('/locations', artwork_controller_1.getLocationsValidation, artwork_controller_1.handleGetLocations);
 router.get('/', artwork_controller_1.listArtworksValidation, auth_middleware_1.optionalAuth, artwork_controller_1.handleListArtworks);
 router.get('/by-slug/:slug', auth_middleware_1.optionalAuth, artwork_controller_1.handleGetArtworkBySlug);
 // Store endpoint — no auth required, purchasability enforced by service layer.
@@ -31,6 +32,9 @@ router.post('/:id/publish', auth_middleware_1.requireAuth, artwork_controller_1.
 router.post('/:id/archive', auth_middleware_1.requireAuth, artwork_controller_1.handleArchiveArtwork);
 router.post('/:id/like', auth_middleware_1.requireAuth, artwork_controller_1.handleToggleLike);
 router.post('/:id/save', auth_middleware_1.requireAuth, artwork_controller_1.handleToggleSave);
+// Explicit view-tracking — see handleTrackView for why this exists
+// alongside the automatic tracking on GET /:id.
+router.post('/:id/view', artwork_controller_1.trackViewValidation, auth_middleware_1.optionalAuth, artwork_controller_1.handleTrackView);
 router.post('/:id/report', auth_middleware_1.requireAuth, artwork_controller_1.reportArtworkValidation, artwork_controller_1.handleReportArtwork);
 router.delete('/:id', auth_middleware_1.requireAuth, artwork_controller_1.handleDeleteArtwork);
 // ── Moderation — MODERATOR or ADMIN only ──────────────────────────────────────

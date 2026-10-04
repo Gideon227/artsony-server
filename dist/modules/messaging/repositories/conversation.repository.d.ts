@@ -14,6 +14,9 @@ export declare const conversationRepository: {
         limit?: number;
         type?: ConversationType;
     }): Promise<ConversationSummary[]>;
+    getOtherParticipants(conversationIds: string[], excludingUserId: string): Promise<Map<string, ParticipantProfile>>;
+    getMyMuteStates(conversationIds: string[], userId: string): Promise<Map<string, boolean>>;
+    markUnread(conversationId: string, userId: string): Promise<void>;
     search(input: {
         userId: string;
         query: string;

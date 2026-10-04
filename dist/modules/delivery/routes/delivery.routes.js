@@ -7,8 +7,9 @@ const delivery_controller_1 = require("../controllers/delivery.controller");
 const router = (0, express_1.Router)();
 exports.deliveryRouter = router;
 router.use(auth_middleware_1.requireAuth);
-// Placed before /:token so Express does not match 'my-downloads' as a token
+// Placed before /:token so Express does not match these as a token
 router.get('/my-downloads', delivery_controller_1.handleGetMyDownloads);
+router.get('/order-items/:orderItemId', delivery_controller_1.downloadRateLimit, delivery_controller_1.orderItemParamValidation, delivery_controller_1.handleGetDownloadForOrderItem);
 // Rate-limited token redemption endpoint
 router.get('/:token', delivery_controller_1.downloadRateLimit, delivery_controller_1.tokenParamValidation, delivery_controller_1.handleRedeemToken);
 //# sourceMappingURL=delivery.routes.js.map

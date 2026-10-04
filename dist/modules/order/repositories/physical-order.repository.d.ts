@@ -1,4 +1,4 @@
-import type { OrderItemPhysical, OrderTimelineEvent, DeliveryProof, OrderInvoice, OrderReceipt, RefundRequest, PhysicalOrderFilters, TimelineStatus, RefundStatus, CourierServiceType } from '../../../common/types/commerce.types';
+import type { OrderItemPhysical, OrderItemPhysicalListEntry, OrderTimelineEvent, DeliveryProof, OrderInvoice, OrderReceipt, RefundRequest, PhysicalOrderFilters, TimelineStatus, RefundStatus, CourierServiceType } from '../../../common/types/commerce.types';
 export declare const physicalOrderRepository: {
     assignOrderNumber(orderId: string): Promise<string>;
     getOrderNumber(orderId: string): Promise<string | null>;
@@ -82,7 +82,7 @@ export declare const physicalOrderRepository: {
     findPendingRefundRequests(): Promise<RefundRequest[]>;
     findPhysicalItemsAwaitingConfirmation(olderThanDate: Date): Promise<OrderItemPhysical[]>;
     findAllAdminList(filters: PhysicalOrderFilters): Promise<{
-        data: OrderItemPhysical[];
+        data: OrderItemPhysicalListEntry[];
         total: number;
         page: number;
         limit: number;
@@ -91,7 +91,7 @@ export declare const physicalOrderRepository: {
         has_prev: boolean;
     }>;
     findBySellerWithItems(sellerId: string, filters: PhysicalOrderFilters): Promise<{
-        data: OrderItemPhysical[];
+        data: OrderItemPhysicalListEntry[];
         total: number;
         page: number;
         limit: number;
@@ -100,7 +100,7 @@ export declare const physicalOrderRepository: {
         has_prev: boolean;
     }>;
     findByBuyerWithItems(buyerId: string, filters: PhysicalOrderFilters): Promise<{
-        data: OrderItemPhysical[];
+        data: OrderItemPhysicalListEntry[];
         total: number;
         page: number;
         limit: number;

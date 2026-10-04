@@ -9,7 +9,11 @@ export declare function getSizeLabels(): Promise<{
     artwork_count: number;
 }[]>;
 export declare function getTopPicks(limit?: number, period?: 'all' | 'week', listingType?: 'MARKETPLACE' | 'PORTFOLIO'): Promise<Artwork[]>;
-export declare function getLocations(): Promise<{
+export declare function getTrendingArtworks(limit?: number, windowDays?: number, listingType?: 'MARKETPLACE' | 'PORTFOLIO'): Promise<Artwork[]>;
+export declare function getLocations(level: 'country' | 'state' | 'city', parent?: {
+    country?: string;
+    state?: string;
+}): Promise<{
     label: string;
     artwork_count: number;
 }[]>;

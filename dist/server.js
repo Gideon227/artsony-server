@@ -5,6 +5,8 @@ const app_1 = require("./app");
 const ws_server_1 = require("./modules/ws/ws.server");
 const redis_pubsub_1 = require("./modules/redis/redis.pubsub");
 const redis_client_1 = require("./modules/redis/redis.client");
+const payment_job_1 = require("./modules/payment/jobs/payment.job");
+const account_purge_job_1 = require("./modules/auth/jobs/account-purge.job");
 require("./modules/order/jobs/order-confirmation-timeout.job");
 const config_1 = require("./config");
 const app = (0, app_1.createApp)();
@@ -19,19 +21,36 @@ async function start() {
         console.error('[Redis] Connection failed:', err);
         process.exit(1);
     }
-    // ── Register recurring background jobs
-    // if (config.env !== 'test') {
-    //   await startExpireScheduler()
-    // }
     // ── Attach WebSocket server
     // Must be called BEFORE httpServer.listen so the upgrade event listener
     // is registered before any connections arrive.
     (0, ws_server_1.createWsServer)(httpServer);
-    // ── Start HTTP server 
+    // ── Start HTTP server
+    // Deliberately listens BEFORE background job registration below — job
+    // scheduling must never be able to block (or, if Redis/Bull is slow to
+    // establish its own connections, delay) the server from accepting
+    // traffic. A previous version awaited these in series before listen()
+    // and a slow Bull connection took the entire app down with it.
     httpServer.listen(config_1.config.port, () => {
         console.log(`[Server] HTTP + WS running on port ${config_1.config.port} (${config_1.config.env})`);
         console.log(`[Server] WebSocket endpoint: ws://localhost:${config_1.config.port}/ws`);
     });
+    // ── Register recurring background jobs (non-blocking)
+    // NOTE: startExpireScheduler was previously never called (left
+    // commented out) — the stale-order expiry sweep has not been running.
+    // Fixed here alongside wiring up the new account purge sweep, since both
+    // are the same class of bug (a periodic job built but never started).
+    // Bull creates its own Redis connections per queue, separate from the
+    // getRedis() client checked above, so these are fired off without
+    // blocking server startup and each has its own error handling.
+    if (config_1.config.env !== 'test') {
+        (0, payment_job_1.startExpireScheduler)().catch((err) => {
+            console.error('[Server] Failed to start payment expiry scheduler:', err);
+        });
+        (0, account_purge_job_1.startAccountPurgeSweep)().catch((err) => {
+            console.error('[Server] Failed to start account purge sweep:', err);
+        });
+    }
     // ── Graceful shutdown ──────────────────────────────────────────────────────
     const shutdown = async (signal) => {
         console.log(`[Server] ${signal} received — shutting down gracefully`);

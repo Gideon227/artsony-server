@@ -38,10 +38,7 @@ export const config = {
     privateKey: require_env('JWT_PRIVATE_KEY').replace(/\\n/g, '\n'),
     publicKey: require_env('JWT_PUBLIC_KEY').replace(/\\n/g, '\n'),
     accessTokenTtl: 15 * 60,
-    // Sliding window: sessionRepository.rotate() extends this on every
-    // successful refresh, so an active user is never forced to log back in.
-    // A session only actually expires after this long of *no* activity at all.
-    refreshTokenTtl: 90 * 24 * 60 * 60, // 3 months
+    refreshTokenTtl: 30 * 24 * 60 * 60,
     issuer: 'artsony',
     audience: 'artsony-client',
   },
@@ -101,6 +98,19 @@ export const config = {
     emailQueue: 'artsony:queue:email',
     deletionQueue: 'artsony:queue:account-deletion',
     accountDeletionGraceDays: 30,
+  },
+
+  // ── Cloudinary (artwork/profile media storage) ────────────────────────────
+  // Previously read directly from process.env in cloudinary.service.ts with
+  // only a console.warn on missing vars — a misconfigured production
+  // deployment would start up fine and only fail (or silently misbehave)
+  // the first time someone uploaded a file. Routed through require_env()
+  // here so that's a startup crash instead, matching every other external
+  // integration in this file.
+  cloudinary: {
+    cloudName: require_env('CLOUDINARY_CLOUD_NAME'),
+    apiKey:    require_env('CLOUDINARY_API_KEY'),
+    apiSecret: require_env('CLOUDINARY_API_SECRET'),
   },
 
   // ── Wallet / payouts ──────────────────────────────────────────────────────

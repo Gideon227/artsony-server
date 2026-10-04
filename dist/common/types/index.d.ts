@@ -1,11 +1,12 @@
 import type { WebSocket } from 'ws';
 import { Moodboard } from "./moodboard.types";
 export type UserRole = 'USER' | 'ARTIST' | 'MODERATOR' | 'ADMIN';
-export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED';
+export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED' | 'DEACTIVATED';
 export type AuthProvider = 'local' | 'google' | 'facebook';
 export type User = {
     id: string;
     email: string;
+    username: string;
     password_hash: string | null;
     provider: AuthProvider;
     provider_id: string | null;
@@ -22,7 +23,33 @@ export type User = {
     created_at: Date;
     updated_at: Date;
     deleted_at: Date | null;
+    purged_at: Date | null;
 };
+export type UserProfileFields = {
+    display_name: string | null;
+    avatar_url: string | null;
+    bio: string | null;
+    country: string | null;
+    state: string | null;
+    city: string | null;
+    background_url: string | null;
+    website_url: string | null;
+    behance_url: string | null;
+    pinterest_url: string | null;
+    twitter_url: string | null;
+    linkedin_url: string | null;
+    followers_count: number;
+    following_count: number;
+    artworks_count: number;
+    sales_count: number;
+};
+export type PrivacyLevel = 'EVERYONE' | 'FOLLOWERS' | 'NO_ONE';
+export type PrivacySettings = {
+    who_can_message: PrivacyLevel;
+    who_can_comment: PrivacyLevel;
+    who_can_purchase: PrivacyLevel;
+};
+export type UserWithProfile = User & UserProfileFields;
 export type PublicUser = {
     id: string;
     email: string;
@@ -109,6 +136,7 @@ export type ConversationSummary = {
     last_activity_at: Date;
     last_message_id: string | null;
     unread_count: number;
+    is_muted: boolean;
     last_message?: MessagePreview | null;
     other_user?: ParticipantProfile | null;
 };
@@ -130,6 +158,7 @@ export type ParticipantProfile = {
     joined_at: Date;
     left_at: Date | null;
     email: string;
+    username: string;
     display_name: string | null;
     avatar_url: string | null;
 };
@@ -196,7 +225,7 @@ export type MessageReadSummary = {
     }>;
     last_read_at: Date | null;
 };
-export type NotificationType = 'like' | 'comment' | 'reply' | 'follow' | 'sale' | 'order_update' | 'system' | 'message' | 'broadcast' | 'mention';
+export type NotificationType = 'like' | 'comment' | 'reply' | 'follow' | 'sale' | 'order_update' | 'system' | 'message' | 'broadcast' | 'mention' | 'review';
 export type NotificationPreferences = {
     id: string;
     user_id: string;

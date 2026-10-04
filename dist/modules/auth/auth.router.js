@@ -17,6 +17,8 @@ router.post('/login', rate_limit_middleware_1.loginRateLimit, rate_limit_middlew
 router.post('/logout', auth_middleware_1.requireAuth, auth_controller_1.handleLogout);
 router.post('/refresh', auth_controller_1.handleRefresh);
 router.get('/me', auth_middleware_1.requireAuth, auth_controller_1.handleMe);
+router.patch('/password', auth_middleware_1.requireAuth, auth_controller_1.changePasswordValidation, auth_controller_1.handleChangePassword);
+router.post('/deactivate', auth_middleware_1.requireAuth, auth_controller_1.handleDeactivateAccount);
 router.delete('/account', auth_middleware_1.requireAuth, auth_controller_1.handleDeleteAccount);
 // ─── Password reset ───────────────────────────────────────────────────────────
 router.post('/forgot-password', rate_limit_middleware_1.resetRateLimit, auth_controller_1.forgotPasswordValidation, auth_controller_1.handleForgotPassword);

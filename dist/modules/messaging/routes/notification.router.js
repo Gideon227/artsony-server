@@ -14,6 +14,10 @@ router.get('/', notification_controller_1.listNotificationsValidation, notificat
 // GET  /api/notifications/unread-count
 // Must be registered before /:id to avoid param collision
 router.get('/unread-count', notification_controller_1.handleGetUnreadCount);
+// GET/PATCH /api/notifications/preferences
+// Must be registered before /:id to avoid param collision
+router.get('/preferences', notification_controller_1.handleGetPreferences);
+router.patch('/preferences', notification_controller_1.updatePreferencesValidation, notification_controller_1.handleUpdatePreferences);
 // POST /api/notifications/read-all
 router.post('/read-all', notification_controller_1.handleMarkAllRead);
 // POST /api/notifications/:id/read

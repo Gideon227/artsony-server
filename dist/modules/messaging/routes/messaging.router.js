@@ -20,6 +20,7 @@ router.get('/:id', conversation_controller_1.handleGetConversation);
 router.patch('/:id', conversation_controller_1.updateConversationValidation, conversation_controller_1.handleUpdateConversation);
 router.delete('/:id', conversation_controller_1.handleLeaveConversation);
 router.post('/:id/mute', conversation_controller_1.handleMuteConversation);
+router.post('/:id/unread', conversation_controller_1.handleMarkUnread);
 // ─── Message routes ────────────────────────────────────────────────────────────
 // /search within a conversation — before /:mid to avoid param collision
 router.get('/:id/messages/search', message_controller_1.searchMessagesValidation, message_controller_1.handleSearchMessages);

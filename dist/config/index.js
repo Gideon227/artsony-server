@@ -35,7 +35,10 @@ exports.config = {
         privateKey: require_env('JWT_PRIVATE_KEY').replace(/\\n/g, '\n'),
         publicKey: require_env('JWT_PUBLIC_KEY').replace(/\\n/g, '\n'),
         accessTokenTtl: 15 * 60,
-        refreshTokenTtl: 30 * 24 * 60 * 60,
+        // Sliding window: sessionRepository.rotate() extends this on every
+        // successful refresh, so an active user is never forced to log back in.
+        // A session only actually expires after this long of *no* activity at all.
+        refreshTokenTtl: 90 * 24 * 60 * 60, // 3 months
         issuer: 'artsony',
         audience: 'artsony-client',
     },

@@ -7,6 +7,7 @@ type AuthContext = {
 export declare function submitRegistration(userId: string, input: SubmitSellerRegistrationInput, ctx: AuthContext): Promise<SellerRegistration>;
 export declare function getMyRegistration(userId: string): Promise<SellerRegistration>;
 export declare function updateMyRegistration(userId: string, input: UpdateSellerRegistrationInput): Promise<SellerRegistration>;
+export declare function updateDispatchAddress(userId: string, input: Partial<Pick<SellerRegistration, 'address' | 'state' | 'country' | 'postal_code' | 'phone_number'>>): Promise<SellerRegistration>;
 export declare function getRegistrationById(id: string): Promise<SellerRegistration>;
 export declare function listRegistrations(filters: SellerRegistrationFilters): Promise<PaginatedResult<SellerRegistration>>;
 export declare function approveRegistration(id: string, adminId: string, notes: string | undefined, ctx: AuthContext): Promise<SellerRegistration>;

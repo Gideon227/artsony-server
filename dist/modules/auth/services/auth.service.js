@@ -8,12 +8,15 @@ exports.forgotPassword = forgotPassword;
 exports.resetPassword = resetPassword;
 exports.handleOAuthProfile = handleOAuthProfile;
 exports.deleteAccount = deleteAccount;
+exports.changePassword = changePassword;
+exports.deactivateAccount = deactivateAccount;
 const config_1 = require("../../../config");
 const user_repository_1 = require("../repositories/user.repository");
 const session_repository_1 = require("../repositories/session.repository");
 const reset_token_repository_1 = require("../repositories/reset-token.repository");
 const audit_repository_1 = require("../repositories/audit.repository");
 const email_service_1 = require("../../email/email.service");
+const account_purge_job_1 = require("../jobs/account-purge.job");
 const password_service_1 = require("./password.service");
 const token_service_1 = require("./token.service");
 const redis_client_1 = require("../../redis/redis.client");
@@ -58,6 +61,15 @@ async function login(input) {
     }
     if (user['status'] === 'DELETED') {
         throw new errors_1.UnauthorizedError('Account not found');
+    }
+    // Deactivation is self-service and immediately reversible — unlike
+    // SUSPENDED/DELETED, a successful login (meaning the password check
+    // above already passed) reactivates the account automatically rather
+    // than blocking sign-in.
+    if (user['status'] === 'DEACTIVATED') {
+        await user_repository_1.userRepository.update(user['id'], { status: 'ACTIVE' });
+        user['status'] = 'ACTIVE';
+        audit_repository_1.auditRepository.log(buildAudit('AUTH_ACCOUNT_REACTIVATED', user['id'], input.ctx));
     }
     if (user['locked_until'] && user['locked_until'] > new Date()) {
         throw new errors_1.AccountLockedError(user['locked_until']);
@@ -245,12 +257,66 @@ async function deleteAccount(input) {
         user_repository_1.userRepository.incrementTokenVersion(user['id']),
     ]);
     const scheduledAt = new Date(Date.now() + config_1.config.queue.accountDeletionGraceDays * 24 * 60 * 60 * 1000);
+    // Actually enforce the grace period promised below — previously this was
+    // never scheduled anywhere, so accounts stayed soft-deleted indefinitely.
+    await (0, account_purge_job_1.scheduleAccountPurge)(user['id']);
     await email_service_1.emailService.sendAccountDeletionConfirmation({
         to: user['email'],
         displayName: user['email'],
         scheduledAt,
     });
     audit_repository_1.auditRepository.log(buildAudit('AUTH_ACCOUNT_DELETE_INITIATED', user['id'], input.ctx, { scheduledAt }));
+}
+// ─── Change Password (while signed in) ─────────────────────────────────────
+// Distinct from resetPassword — that flow is for a locked-out user via an
+// emailed token; this is for a signed-in user who knows their current
+// password. Revokes all sessions and bumps token_version on success,
+// including the session making this request — the caller must expect to
+// need a fresh login afterward, same security posture as resetPassword.
+async function changePassword(input) {
+    const user = await user_repository_1.userRepository.findById(input.userId);
+    if (!user)
+        throw new errors_1.NotFoundError('User');
+    if (user['provider'] !== 'local' || !user['password_hash']) {
+        throw new errors_1.ValidationError('Validation failed', {
+            password: 'This account signs in via a social provider and has no password to change',
+        });
+    }
+    const valid = await (0, password_service_1.verifyPassword)(user['password_hash'], input.currentPassword);
+    if (!valid)
+        throw new errors_1.UnauthorizedError('Current password is incorrect');
+    (0, password_service_1.validatePasswordComplexity)(input.newPassword);
+    const newHash = await (0, password_service_1.hashPassword)(input.newPassword);
+    await Promise.all([
+        user_repository_1.userRepository.update(user['id'], { password_hash: newHash }),
+        user_repository_1.userRepository.incrementTokenVersion(user['id']),
+        session_repository_1.sessionRepository.revokeAllForUser(user['id']),
+    ]);
+    audit_repository_1.auditRepository.log(buildAudit('AUTH_PASSWORD_CHANGED', user['id'], input.ctx));
+}
+// ─── Deactivate Account ─────────────────────────────────────────────────────
+// Self-service and immediately reversible by logging back in (see the
+// DEACTIVATED branch in login() above) — distinct from deleteAccount,
+// which starts an irreversible-after-the-grace-period purge.
+async function deactivateAccount(input) {
+    const user = await user_repository_1.userRepository.findById(input.userId);
+    if (!user)
+        throw new errors_1.NotFoundError('User');
+    if (user['provider'] === 'local') {
+        if (!input.password)
+            throw new errors_1.ValidationError('Password confirmation required');
+        if (!user['password_hash'])
+            throw new errors_1.UnauthorizedError();
+        const valid = await (0, password_service_1.verifyPassword)(user['password_hash'], input.password);
+        if (!valid)
+            throw new errors_1.UnauthorizedError('Incorrect password');
+    }
+    await Promise.all([
+        user_repository_1.userRepository.update(user['id'], { status: 'DEACTIVATED' }),
+        session_repository_1.sessionRepository.revokeAllForUser(user['id']),
+        user_repository_1.userRepository.incrementTokenVersion(user['id']),
+    ]);
+    audit_repository_1.auditRepository.log(buildAudit('AUTH_ACCOUNT_DEACTIVATED', user['id'], input.ctx));
 }
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 async function issueTokenPair(user, ctx) {

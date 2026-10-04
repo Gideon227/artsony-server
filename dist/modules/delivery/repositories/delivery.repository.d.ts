@@ -1,4 +1,4 @@
-import type { DigitalDeliveryToken } from '../../../common/types/commerce.types';
+import type { DigitalDeliveryToken, DigitalDeliveryTokenWithArtwork } from '../../../common/types/commerce.types';
 export declare const deliveryRepository: {
     create(input: {
         order_item_id: string;
@@ -10,7 +10,7 @@ export declare const deliveryRepository: {
     }): Promise<DigitalDeliveryToken>;
     findByHash(tokenHash: string): Promise<DigitalDeliveryToken | undefined>;
     findByOrderItem(orderItemId: string): Promise<DigitalDeliveryToken | undefined>;
-    findByBuyer(buyerId: string): Promise<DigitalDeliveryToken[]>;
+    findByBuyer(buyerId: string): Promise<DigitalDeliveryTokenWithArtwork[]>;
     recordDownload(tokenId: string): Promise<DigitalDeliveryToken>;
 };
 //# sourceMappingURL=delivery.repository.d.ts.map

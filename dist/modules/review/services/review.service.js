@@ -58,7 +58,7 @@ exports.reviewService = {
         void notification_service_1.notificationService.create({
             recipientId: eligibility.seller_id,
             actorId: input.buyerId,
-            type: 'comment',
+            type: 'review',
             entityId: review.id,
             entityType: 'order_review',
             data: {

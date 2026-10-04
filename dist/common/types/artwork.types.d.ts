@@ -5,6 +5,7 @@ export type ArtworkMediaType = 'IMAGE' | 'VIDEO' | 'THREE_D' | 'EXTERNAL_LINK';
 export type ArtworkVisibility = 'PUBLIC' | 'PRIVATE' | 'UNLISTED';
 export type ArtworkStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' | 'UNDER_REVIEW' | 'PAUSED';
 export type ModerationStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'FLAGGED';
+export type LicenseType = 'attribution' | 'attribution-sharealike' | 'attribution-derivs' | 'attribution-non-commercial';
 export type ArtworkAsset = {
     id: string;
     original_url: string;
@@ -63,6 +64,7 @@ export type Artwork = {
     status: ArtworkStatus;
     is_flagged: boolean;
     is_saved?: boolean;
+    is_liked?: boolean;
     moderation_status: ModerationStatus;
     reviewed_by: string | null;
     review_notes: string | null;
@@ -72,6 +74,11 @@ export type Artwork = {
     physical_details: PhysicalDetails | null;
     has_variants: boolean;
     variants: Variant[];
+    license_type: LicenseType | null;
+    license: {
+        type: string;
+        url: string;
+    } | null;
     view_count: number;
     like_count: number;
     save_count: number;
@@ -103,6 +110,7 @@ export type CreateArtworkInput = {
     physical_details?: PhysicalDetails;
     has_variants: boolean;
     variants?: Omit<Variant, 'id'>[];
+    license_type?: LicenseType;
 };
 export type UpdateArtworkInput = Partial<Omit<CreateArtworkInput, 'listing_type' | 'artwork_format'>>;
 export type ArtworkFilters = {
@@ -116,7 +124,9 @@ export type ArtworkFilters = {
     min_price?: number;
     max_price?: number;
     search?: string;
-    location?: string;
+    country?: string;
+    state?: string;
+    city?: string;
     size_label?: string;
     page?: number;
     limit?: number;

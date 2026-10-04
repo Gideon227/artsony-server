@@ -6,6 +6,7 @@ exports.getArtworkBySlug = getArtworkBySlug;
 exports.getFeaturedArtworks = getFeaturedArtworks;
 exports.getSizeLabels = getSizeLabels;
 exports.getTopPicks = getTopPicks;
+exports.getTrendingArtworks = getTrendingArtworks;
 exports.getLocations = getLocations;
 exports.listArtworks = listArtworks;
 exports.getFeed = getFeed;
@@ -169,14 +170,22 @@ async function getArtworkById(id, requesterId) {
     return artwork;
 }
 async function getArtworkBySlug(slug, requesterId) {
-    const cached = await (0, redis_client_1.redisGetJson)(redis_client_1.RedisKeys.artworkBySlug(slug));
-    if (cached)
-        return cached;
-    const artwork = await artwork_repository_1.artworkRepository.findBySlug(slug);
+    // Per-user fields (is_liked / is_saved) and owner-only visibility mean only
+    // the anonymous shape may share a cache entry, same as getArtworkById.
+    if (!requesterId) {
+        const cached = await (0, redis_client_1.redisGetJson)(redis_client_1.RedisKeys.artworkBySlug(slug));
+        if (cached) {
+            enforceVisibilityRead(cached, requesterId);
+            return cached;
+        }
+    }
+    const artwork = await artwork_repository_1.artworkRepository.findBySlug(slug, requesterId);
     if (!artwork)
         throw new errors_1.NotFoundError('Artwork');
     enforceVisibilityRead(artwork, requesterId);
-    void (0, redis_client_1.redisSetJson)(redis_client_1.RedisKeys.artworkBySlug(slug), artwork, redis_client_1.RedisTTL.artworkSingle);
+    if (!requesterId) {
+        void (0, redis_client_1.redisSetJson)(redis_client_1.RedisKeys.artworkBySlug(slug), artwork, redis_client_1.RedisTTL.artworkSingle);
+    }
     return artwork;
 }
 // ── Featured artworks (homepage hero) ─────────────────────────────────────────
@@ -272,12 +281,29 @@ async function getTopPicks(limit = 8, period = 'all', listingType) {
     void (0, redis_client_1.redisSetJson)(cacheKey, result, redis_client_1.RedisTTL.artworkFeed);
     return result;
 }
-async function getLocations() {
-    const cached = await (0, redis_client_1.redisGetJson)(redis_client_1.RedisKeys.locations());
+// "Trending this week" REGARDLESS of upload date — see getTopPicks(period=
+// 'week') above for the upload-date-scoped version. This scores by summed
+// artwork_engagement_daily activity in the window, so an artwork uploaded
+// months ago that just picked up a burst of likes/views still qualifies.
+async function getTrendingArtworks(limit = 8, windowDays = 7, listingType) {
+    const cacheKey = redis_client_1.RedisKeys.trending(limit, windowDays, listingType);
+    const cached = await (0, redis_client_1.redisGetJson)(cacheKey);
     if (cached)
         return cached;
-    const result = await artwork_repository_1.artworkRepository.getDistinctLocations();
-    void (0, redis_client_1.redisSetJson)(redis_client_1.RedisKeys.locations(), result, redis_client_1.RedisTTL.artworkFeed);
+    const sinceDay = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+    const result = await artwork_repository_1.artworkRepository.getTrendingByActivity(sinceDay, limit, listingType);
+    void (0, redis_client_1.redisSetJson)(cacheKey, result, redis_client_1.RedisTTL.artworkFeed);
+    return result;
+}
+async function getLocations(level, parent = {}) {
+    const cacheKey = redis_client_1.RedisKeys.locations(level, parent.country, parent.state);
+    const cached = await (0, redis_client_1.redisGetJson)(cacheKey);
+    if (cached)
+        return cached;
+    const result = await artwork_repository_1.artworkRepository.getDistinctLocations(level, parent);
+    void (0, redis_client_1.redisSetJson)(cacheKey, result, redis_client_1.RedisTTL.artworkFeed);
     return result;
 }
 async function listArtworks(filters, requesterId, requesterRole) {
@@ -331,6 +357,14 @@ async function getFeed(mode, filters, requesterId) {
             // category affinity from what the requester has liked, commented on,
             // or rated 5 stars. A brand-new user with no signal yet just gets the
             // default trending order rather than an empty feed.
+            //
+            // If the requester explicitly picked a category filter themselves,
+            // that takes priority — this used to unconditionally overwrite it
+            // with the auto-computed engagement categories, silently discarding
+            // whatever the user had selected in the filter UI.
+            if (base.categories?.length) {
+                return artwork_repository_1.artworkRepository.list({ ...base, sort_by: 'created_at', sort_order: 'desc' });
+            }
             if (!requesterId)
                 return artwork_repository_1.artworkRepository.list({ ...base, sort_by: 'like_count', sort_order: 'desc' });
             const categories = await artwork_repository_1.artworkRepository.getEngagedCategories(requesterId);

@@ -165,7 +165,13 @@ export async function createArtwork(
   }
 
   const slug = await artworkRepository.generateSlug(input.title, creatorId)
-  return artworkRepository.create(input, creatorId, slug)
+
+  if (input.status !== 'PUBLISHED') {
+    return artworkRepository.create(input, creatorId, slug)
+  }
+
+  const draft = await artworkRepository.create({ ...input, status: 'DRAFT' }, creatorId, slug)
+  return publishArtwork(draft.id, creatorId, requesterRole)
 }
 
 export async function getArtworkById(

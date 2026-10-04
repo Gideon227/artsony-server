@@ -119,6 +119,30 @@ exports.sellerRepository = {
         (0, database_1.assertNoError)(result, 'seller.updatePendingByUser');
         return toSellerRegistration(result.data);
     },
+    // Distinct from updatePendingByUser above, which lets an applicant edit
+    // their whole application while it's still under review. Once APPROVED,
+    // identity fields (full_name, username, email — the things reviewed
+    // during approval) should not be silently re-editable, but a seller's
+    // physical dispatch location is a legitimate, ordinary thing to need to
+    // change (they moved studios, etc.) — scoped to only those columns, and
+    // only once the registration is actually APPROVED.
+    async updateDispatchAddressByUser(userId, input) {
+        const payload = {
+            ...input,
+            ['updated_at']: new Date().toISOString(),
+        };
+        const result = await (0, database_1.supabase)()
+            .from('seller_registrations')
+            .update(payload)
+            .eq('user_id', userId)
+            .eq('status', 'APPROVED')
+            .select('*')
+            .single();
+        if (result.error?.code === 'PGRST116')
+            return undefined;
+        (0, database_1.assertNoError)(result, 'seller.updateDispatchAddressByUser');
+        return toSellerRegistration(result.data);
+    },
     // Atomic status transition via RPC — see transition_seller_registration().
     // Also flips users.role, bumps token_version, and pauses/restores the
     // seller's MARKETPLACE artworks, all inside one DB transaction so a

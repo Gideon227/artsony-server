@@ -1,8 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.artworkRepository = void 0;
+exports.pickThumbnail = pickThumbnail;
 const uuid_1 = require("uuid");
 const database_1 = require("../../../config/database");
+// Display label + canonical CC URL for each stored license_type — kept here
+// rather than in the DB so copy changes don't need a migration. Labels match
+// upload-step-two.tsx's dropdown text exactly.
+const LICENSE_INFO = {
+    'attribution': { type: 'Attribution (CC BY)', url: 'https://creativecommons.org/licenses/by/4.0/' },
+    'attribution-sharealike': { type: 'Attribution-ShareAlike (CC BY-SA)', url: 'https://creativecommons.org/licenses/by-sa/4.0/' },
+    'attribution-derivs': { type: 'Attribution Derivs (CC BY-ND)', url: 'https://creativecommons.org/licenses/by-nd/4.0/' },
+    'attribution-non-commercial': { type: 'Attribution-Non-commercial (CC BY-NC)', url: 'https://creativecommons.org/licenses/by-nc/4.0/' },
+};
 // ── Row → Domain mapper ───────────────────────────────────────────────────────
 function parseJsonField(value, fallback) {
     if (value == null)
@@ -17,7 +27,7 @@ function parseJsonField(value, fallback) {
     }
     return value;
 }
-function toArtwork(row, isSaved) {
+function toArtwork(row, isSaved, isLiked) {
     return {
         ['id']: row['id'],
         ['listing_type']: row['listing_type'],
@@ -40,6 +50,7 @@ function toArtwork(row, isSaved) {
         ['status']: row['status'],
         ['is_flagged']: row['is_flagged'],
         ...(isSaved !== undefined ? { is_saved: isSaved } : {}),
+        ...(isLiked !== undefined ? { is_liked: isLiked } : {}),
         ['moderation_status']: row['moderation_status'],
         ['reviewed_by']: row['reviewed_by'] ?? null,
         ['review_notes']: row['review_notes'] ?? null,
@@ -49,6 +60,8 @@ function toArtwork(row, isSaved) {
         ['physical_details']: parseJsonField(row['physical_details'], null),
         ['has_variants']: row['has_variants'],
         ['variants']: parseJsonField(row['variants'], []),
+        ['license_type']: row['license_type'] ?? null,
+        ['license']: row['license_type'] ? LICENSE_INFO[row['license_type']] ?? null : null,
         ['view_count']: row['view_count'],
         ['like_count']: row['like_count'],
         ['save_count']: row['save_count'],
@@ -93,7 +106,21 @@ function pickThumbnail(assets) {
     if (!list.length)
         return null;
     const primary = [...list].sort((a, b) => a.ordering_index - b.ordering_index)[0];
-    return primary?.thumbnail_url ?? primary?.optimized_url ?? primary?.original_url ?? null;
+    if (!primary)
+        return null;
+    // `optimized_url`/`original_url` are only safe stand-ins for a thumbnail
+    // when the primary asset is itself a static image. For VIDEO/THREE_D/
+    // EXTERNAL_LINK assets those fields point at a video file, a 3D model, or
+    // an external resource — none of which a plain <img>/CSS background-image
+    // can render. Falling back to them there used to produce a "blank/black"
+    // hero slide or card whenever a video's dedicated thumbnail_url wasn't
+    // generated (e.g. an eager Cloudinary transform that didn't come back).
+    // For non-image assets, only a real thumbnail_url counts as a thumbnail —
+    // otherwise report "no thumbnail" so callers fall back to a placeholder.
+    if (primary.media_type !== 'IMAGE') {
+        return primary.thumbnail_url ?? null;
+    }
+    return primary.thumbnail_url ?? primary.optimized_url ?? primary.original_url ?? null;
 }
 function toFeaturedArtwork(row) {
     const creatorRow = row['creator'] ?? {};
@@ -165,6 +192,8 @@ exports.artworkRepository = {
             payload['max_purchase_quantity'] = input.max_purchase_quantity;
         if (input.physical_details)
             payload['physical_details'] = JSON.stringify(input.physical_details);
+        if (input.license_type !== undefined)
+            payload['license_type'] = input.license_type;
         const result = await (0, database_1.supabase)()
             .from('artworks')
             .insert(payload)
@@ -185,7 +214,8 @@ exports.artworkRepository = {
             return undefined;
         (0, database_1.assertNoError)(result, 'artwork.findById');
         const isSaved = requesterId ? await this.findSaveStatus(id, requesterId) : undefined;
-        return toArtwork(result.data, isSaved);
+        const isLiked = requesterId ? await this.hasLiked(id, requesterId) : undefined;
+        return toArtwork(result.data, isSaved, isLiked);
     },
     // ── FindBySlug 
     async findBySlug(slug, requesterId) {
@@ -199,7 +229,8 @@ exports.artworkRepository = {
             return undefined;
         (0, database_1.assertNoError)(result, 'artwork.findBySlug');
         const isSaved = requesterId ? await this.findSaveStatus(result.data.id, requesterId) : undefined;
-        return toArtwork(result.data, isSaved);
+        const isLiked = requesterId ? await this.hasLiked(result.data.id, requesterId) : undefined;
+        return toArtwork(result.data, isSaved, isLiked);
     },
     // ── Update (SECURED WITH DEEP MERGE) ───────────────────────────────────────
     async update(id, input) {
@@ -242,6 +273,8 @@ exports.artworkRepository = {
             payload['max_purchase_quantity'] = input.max_purchase_quantity;
         if (input.has_variants !== undefined)
             payload['has_variants'] = input.has_variants;
+        if (input.license_type !== undefined)
+            payload['license_type'] = input.license_type;
         // 2. Safe Array Merge for Assets
         if (input.assets !== undefined) {
             const existingAssetsMap = new Map(existing.assets.map(a => [a.id, a]));
@@ -382,7 +415,7 @@ exports.artworkRepository = {
     },
     async hasLiked(artworkId, userId) {
         const result = await (0, database_1.supabase)()
-            .from('artwork_likes')
+            .from('likes')
             .select('id')
             .eq('artwork_id', artworkId)
             .eq('user_id', userId)
@@ -404,8 +437,12 @@ exports.artworkRepository = {
         // on profiles; size lives inside a JSONB array), so they're resolved
         // up front and then applied the same way creator_ids already is.
         let resolvedCreatorIds = filters.creator_ids;
-        if (filters.location?.trim()) {
-            const locationCreatorIds = await this.getCreatorIdsByLocation(filters.location.trim());
+        if (filters.country || filters.state || filters.city) {
+            const locationCreatorIds = await this.getCreatorIdsByLocation({
+                country: filters.country,
+                state: filters.state,
+                city: filters.city,
+            });
             if (locationCreatorIds.length === 0) {
                 return emptyResult(page, limit);
             }
@@ -485,7 +522,7 @@ exports.artworkRepository = {
     // cacheable/fast on its own indexes.
     async getEngagedCategories(userId, limit = 5) {
         const [likedRes, commentedRes, ratedRes] = await Promise.all([
-            (0, database_1.supabase)().from('artwork_likes').select('artwork_id').eq('user_id', userId),
+            (0, database_1.supabase)().from('likes').select('artwork_id').eq('user_id', userId),
             (0, database_1.supabase)().from('comments').select('artwork_id').eq('user_id', userId).is('deleted_at', null),
             (0, database_1.supabase)().from('order_reviews').select('artwork_id').eq('buyer_id', userId).eq('rating', 5),
         ]);
@@ -534,20 +571,42 @@ exports.artworkRepository = {
         }
         return (result.data ?? []).map((r) => r['id']);
     },
-    // ── Location filter ("profiles.location" substring match) ───────────────────
-    // profiles.location is free text (not an ISO code), so this is a substring
-    // match rather than exact — "Lagos, Nigeria" should match a "Nigeria"
-    // filter. Two-step (resolve creator ids, then .in() on the main query),
-    // same pattern as getRecentArtistIds/getEngagedCategories above.
-    async getCreatorIdsByLocation(locationQuery) {
-        const result = await (0, database_1.supabase)()
-            .from('profiles')
-            .select('user_id')
-            .ilike('location', `%${locationQuery}%`);
+    // ── Location filter (country/state/city) ────────────────────────────────────
+    // country is an ISO code, exact match. state/city are free text, so those
+    // stay substring matches. Two-step (resolve creator ids, then .in() on the
+    // main query), same pattern as getRecentArtistIds/getEngagedCategories above.
+    async getCreatorIdsByLocation(filters) {
+        let query = (0, database_1.supabase)().from('profiles').select('user_id');
+        // country is an ISO code — exact match. state/city are free text
+        // (same as shipping_addresses/seller_registrations), so fuzzy/
+        // case-insensitive match to tolerate minor variations.
+        if (filters.country)
+            query = query.eq('country', filters.country.toUpperCase());
+        if (filters.state)
+            query = query.ilike('state', `%${filters.state}%`);
+        if (filters.city)
+            query = query.ilike('city', `%${filters.city}%`);
+        const result = await query;
         if (result.error) {
             throw new Error(`[Supabase:artwork.getCreatorIdsByLocation] ${result.error.message}`);
         }
         return (result.data ?? []).map((r) => r['user_id']);
+    },
+    // Cascading distinct-value lookup backing the location filter dropdowns —
+    // see get_distinct_artist_locations() migration for the level semantics.
+    async getDistinctLocations(level, parent) {
+        const result = await (0, database_1.supabase)().rpc('get_distinct_artist_locations', {
+            p_level: level,
+            p_country: parent?.country ?? null,
+            p_state: parent?.state ?? null,
+        });
+        if (result.error) {
+            throw new Error(`[Supabase:artwork.getDistinctLocations] ${result.error.message}`);
+        }
+        return (result.data ?? []).map((r) => ({
+            label: r['label'],
+            artwork_count: Number(r['artwork_count']),
+        }));
     },
     // ── Size variant ("Medium") filter ───────────────────────────────────────────
     // variants is a JSONB array with no relational table backing it, so both
@@ -571,7 +630,7 @@ exports.artworkRepository = {
         }
         return (result.data ?? []).map((r) => r['id']);
     },
-    async findManyByIdsOrdered(ids) {
+    async findManyByIdsOrdered(ids, requesterId) {
         if (ids.length === 0)
             return [];
         const result = await (0, database_1.supabase)()
@@ -582,17 +641,24 @@ exports.artworkRepository = {
             throw new Error(`[Supabase:artwork.findManyByIdsOrdered] ${result.error.message}`);
         }
         const byId = new Map((result.data ?? []).map((row) => [row.id, row]));
-        return ids.map((id) => byId.get(id)).filter(Boolean).map((row) => toArtwork(row));
-    },
-    async getDistinctLocations() {
-        const result = await (0, database_1.supabase)().rpc('get_distinct_artist_locations');
-        if (result.error) {
-            throw new Error(`[Supabase:artwork.getDistinctLocations] ${result.error.message}`);
+        let likedIds = new Set();
+        let savedIds = new Set();
+        if (requesterId) {
+            const [likes, saves] = await Promise.all([
+                (0, database_1.supabase)().from('likes').select('artwork_id').eq('user_id', requesterId).in('artwork_id', ids),
+                (0, database_1.supabase)().from('saves').select('artwork_id').eq('user_id', requesterId).in('artwork_id', ids),
+            ]);
+            if (likes.error)
+                throw new Error(`[Supabase:artwork.findManyByIdsOrdered.likes] ${likes.error.message}`);
+            if (saves.error)
+                throw new Error(`[Supabase:artwork.findManyByIdsOrdered.saves] ${saves.error.message}`);
+            likedIds = new Set((likes.data ?? []).map((r) => r.artwork_id));
+            savedIds = new Set((saves.data ?? []).map((r) => r.artwork_id));
         }
-        return (result.data ?? []).map((r) => ({
-            label: r['label'],
-            artwork_count: Number(r['artwork_count']),
-        }));
+        return ids
+            .map((id) => byId.get(id))
+            .filter(Boolean)
+            .map((row) => requesterId ? toArtwork(row, savedIds.has(row.id), likedIds.has(row.id)) : toArtwork(row));
     },
     // ── Top Picks ─────────────────────────────────────────────────────────────────
     // Real ranking algorithm (decayed hot-score, one per creator for
@@ -622,8 +688,24 @@ exports.artworkRepository = {
         }
         // Preserve the RPC's ranking order — the embed re-fetch above doesn't
         // guarantee row order matches the .in() list.
-        const byId = new Map((embedResult.data ?? []).map((row) => [row.id, row]));
-        return ids.map((id) => toArtwork(byId.get(id))).filter(Boolean);
+        const byId = new Map((embedResult.data ?? []).map((row) => [row['id'], row]));
+        return ids.map((id) => byId.get(id)).filter(Boolean).map((row) => toArtwork(row));
+    },
+    // "Trending this week regardless of upload date" — scores by summed
+    // artwork_engagement_daily activity since p_sinceDay, not by created_at,
+    // so an older artwork that picks up likes/views recently still qualifies.
+    // See 20260915000000_trending_artworks_by_activity.sql.
+    async getTrendingByActivity(sinceDay, limit = 8, listingType) {
+        const result = await (0, database_1.supabase)().rpc('get_trending_artwork_ids', {
+            p_since_day: sinceDay,
+            p_limit: limit,
+            p_listing_type: listingType ?? null,
+        });
+        if (result.error) {
+            throw new Error(`[Supabase:artwork.getTrendingByActivity] ${result.error.message}`);
+        }
+        const ids = (result.data ?? []).map((r) => r['id']);
+        return this.findManyByIdsOrdered(ids);
     },
     // ── Featured artworks (homepage hero) ─────────────────────────────────────────
     // All-time proven performers: real purchases, or a meaningful like count —

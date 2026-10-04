@@ -193,7 +193,7 @@ export const artworkRepository = {
       ['creator_id']: creatorId,
       ['collaborator_ids']: input.collaborator_ids,
       ['tools_used']: input.tools_used,
-      ['assets']: JSON.stringify(assetsWithIds),
+      ['assets']: assetsWithIds,
       ['visibility']: input.visibility,
       ['allow_moodboard_save']:  input.allow_moodboard_save,
       ['allow_comments']: input.allow_comments,
@@ -204,12 +204,12 @@ export const artworkRepository = {
       ['is_flagged']: false,
       ['currency']: input.currency ?? 'USD',
       ['has_variants']: input.has_variants,
-      ['variants']: JSON.stringify(variantsWithIds),
+      ['variants']: variantsWithIds,
     }
 
     if (input.price !== undefined) payload['price'] = input.price
     if (input.max_purchase_quantity !== undefined) payload['max_purchase_quantity'] = input.max_purchase_quantity
-    if (input.physical_details) payload['physical_details'] = JSON.stringify(input.physical_details)
+    if (input.physical_details) payload['physical_details'] = input.physical_details
     if (input.license_type !== undefined) payload['license_type'] = input.license_type
 
     const result = await (supabase() as any)
@@ -304,7 +304,7 @@ export const artworkRepository = {
       const inputAssetIds = new Set(mergedAssets.map(a => a.id))
       const omittedAssets = existing.assets.filter(a => !inputAssetIds.has(a.id))
       
-      payload['assets'] = JSON.stringify([...mergedAssets, ...omittedAssets])
+      payload['assets'] = [...mergedAssets, ...omittedAssets]
     }
 
     // 3. Safe Nested Array Merge for Variants and their Options
@@ -348,7 +348,7 @@ export const artworkRepository = {
       const inputVariantIds = new Set(mergedVariants.map(v => v.id))
       const omittedVariants = existing.variants.filter(v => !inputVariantIds.has(v.id))
 
-      payload['variants'] = JSON.stringify([...mergedVariants, ...omittedVariants])
+      payload['variants'] = [...mergedVariants, ...omittedVariants]
     }
 
     // 4. Safe Object Merge for Physical Details
@@ -360,7 +360,7 @@ export const artworkRepository = {
           ...(existing.physical_details || {}),
           ...input.physical_details
         }
-        payload['physical_details'] = JSON.stringify(mergedPhysicalDetails)
+        payload['physical_details'] = mergedPhysicalDetails
       }
     }
 

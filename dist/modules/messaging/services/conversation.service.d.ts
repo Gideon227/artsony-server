@@ -8,6 +8,7 @@ export declare const conversationService: {
     getById(conversationId: string, requestingUserId: string): Promise<ConversationWithDetails>;
     list(input: ListConversationsInput): Promise<CursorPage<ConversationSummary>>;
     search(input: SearchConversationsInput): Promise<ConversationSummary[]>;
+    markUnread(conversationId: string, userId: string): Promise<void>;
     update(conversationId: string, userId: string, input: UpdateConversationInput): Promise<Conversation>;
     setMuted(conversationId: string, userId: string, muted: boolean): Promise<void>;
     leave(conversationId: string, userId: string): Promise<void>;

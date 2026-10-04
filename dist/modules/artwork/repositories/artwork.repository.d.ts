@@ -1,4 +1,5 @@
 import type { Artwork, ArtworkFilters, PaginatedArtworks, CreateArtworkInput, UpdateArtworkInput, FeaturedArtwork } from '../../../common/types/artwork.types';
+export declare function pickThumbnail(assets: any): string | null;
 export declare const artworkRepository: {
     create(input: CreateArtworkInput, creatorId: string, slug: string): Promise<Artwork>;
     findById(id: string, requesterId?: string): Promise<Artwork | undefined>;
@@ -16,18 +17,26 @@ export declare const artworkRepository: {
     list(filters: ArtworkFilters): Promise<PaginatedArtworks>;
     getEngagedCategories(userId: string, limit?: number): Promise<string[]>;
     getRecentArtistIds(sinceDays?: number, limit?: number): Promise<string[]>;
-    getCreatorIdsByLocation(locationQuery: string): Promise<string[]>;
+    getCreatorIdsByLocation(filters: {
+        country?: string;
+        state?: string;
+        city?: string;
+    }): Promise<string[]>;
+    getDistinctLocations(level: "country" | "state" | "city", parent?: {
+        country?: string;
+        state?: string;
+    }): Promise<{
+        label: string;
+        artwork_count: number;
+    }[]>;
     getDistinctSizeLabels(): Promise<{
         label: string;
         artwork_count: number;
     }[]>;
     getArtworkIdsBySize(sizeLabel: string): Promise<string[]>;
-    findManyByIdsOrdered(ids: string[]): Promise<Artwork[]>;
-    getDistinctLocations(): Promise<{
-        label: string;
-        artwork_count: number;
-    }[]>;
+    findManyByIdsOrdered(ids: string[], requesterId?: string): Promise<Artwork[]>;
     getTopPicks(limit?: number, listingType?: "MARKETPLACE" | "PORTFOLIO"): Promise<Artwork[]>;
+    getTrendingByActivity(sinceDay: string, limit?: number, listingType?: "MARKETPLACE" | "PORTFOLIO"): Promise<Artwork[]>;
     findTopPerformers(limit: number): Promise<FeaturedArtwork[]>;
     findRecentCandidates(sinceIso: string, limit: number, listingType?: "MARKETPLACE" | "PORTFOLIO"): Promise<FeaturedArtwork[]>;
     findFallback(excludeIds: string[], limit: number): Promise<FeaturedArtwork[]>;

@@ -41,7 +41,8 @@ export declare const RedisKeys: {
     readonly artworkBySlug: (slug: string) => string;
     readonly artworkList: (fingerprint: string) => string;
     readonly topPicks: (limit: number, period?: "all" | "week", listingType?: "MARKETPLACE" | "PORTFOLIO") => string;
-    readonly locations: () => string;
+    readonly trending: (limit: number, windowDays: number, listingType?: "MARKETPLACE" | "PORTFOLIO") => string;
+    readonly locations: (level: string, country?: string, state?: string) => string;
     readonly sizeLabels: () => string;
     readonly artworkViewLock: (artworkId: string, id: string) => string;
     readonly artworkFeatured: (limit: number) => string;

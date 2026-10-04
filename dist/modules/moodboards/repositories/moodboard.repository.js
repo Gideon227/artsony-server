@@ -2,6 +2,10 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.moodboardRepository = void 0;
 const database_1 = require("../../../config/database");
+const artwork_repository_1 = require("../../../modules/artwork/repositories/artwork.repository");
+// A cover only needs the first usable artwork, but earlier items can be
+// deleted or unviewable, so a few candidates are read per board.
+const COVER_CANDIDATES = 5;
 exports.moodboardRepository = {
     async create(userId, title) {
         // Cast to any to bypass the 'never' generic constraint locally
@@ -28,7 +32,8 @@ exports.moodboardRepository = {
         // `moodboard_items: [{ count: N }]`. Handling both that and a bare
         // object defensively since this is unverified against your actual DB —
         // log a warning once if neither shape matches so it's easy to spot.
-        return (data ?? []).map((row) => {
+        const covers = await Promise.all((data ?? []).map((row) => this.findCoverThumbnail(row.id, userId)));
+        return (data ?? []).map((row, index) => {
             const embed = row.moodboard_items;
             const artworkCount = Array.isArray(embed)
                 ? (embed[0]?.count ?? 0)
@@ -37,10 +42,48 @@ exports.moodboardRepository = {
                 id: row.id,
                 title: row.title,
                 artwork_count: artworkCount,
+                cover_thumbnail_url: covers[index] ?? null,
                 created_at: new Date(row.created_at),
                 updated_at: new Date(row.updated_at),
             };
         });
+    },
+    // First image of the earliest-added artwork the viewer can still see.
+    async findCoverThumbnail(moodboardId, viewerId) {
+        const db = (0, database_1.supabase)();
+        const { data, error } = await db
+            .from('moodboard_items')
+            .select('added_at, artworks (assets, deleted_at, visibility, status, creator_id, collaborator_ids)')
+            .eq('moodboard_id', moodboardId)
+            .order('added_at', { ascending: true })
+            .limit(COVER_CANDIDATES);
+        if (error)
+            throw error;
+        for (const item of (data ?? [])) {
+            const artwork = item.artworks;
+            if (!artwork || artwork.deleted_at)
+                continue;
+            const isPublic = artwork.visibility === 'PUBLIC' && artwork.status === 'PUBLISHED';
+            const isInvolved = artwork.creator_id === viewerId || (artwork.collaborator_ids ?? []).includes(viewerId);
+            if (!isPublic && !isInvolved)
+                continue;
+            const thumbnail = (0, artwork_repository_1.pickThumbnail)(artwork.assets);
+            if (thumbnail)
+                return thumbnail;
+        }
+        return null;
+    },
+    // Artwork ids in the order they were added to the board.
+    async findArtworkIds(moodboardId) {
+        const db = (0, database_1.supabase)();
+        const { data, error } = await db
+            .from('moodboard_items')
+            .select('artwork_id, added_at')
+            .eq('moodboard_id', moodboardId)
+            .order('added_at', { ascending: true });
+        if (error)
+            throw error;
+        return (data ?? []).map((row) => row.artwork_id);
     },
     async update(id, title) {
         const db = (0, database_1.supabase)();

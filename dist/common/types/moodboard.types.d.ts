@@ -17,6 +17,7 @@ export type MoodboardSummary = {
     id: string;
     title: string;
     artwork_count: number;
+    cover_thumbnail_url: string | null;
     created_at: Date;
     updated_at: Date;
 };

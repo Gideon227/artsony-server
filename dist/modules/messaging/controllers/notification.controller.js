@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.markReadValidation = exports.listNotificationsValidation = void 0;
+exports.updatePreferencesValidation = exports.markReadValidation = exports.listNotificationsValidation = void 0;
+exports.handleGetPreferences = handleGetPreferences;
+exports.handleUpdatePreferences = handleUpdatePreferences;
 exports.handleListNotifications = handleListNotifications;
 exports.handleGetUnreadCount = handleGetUnreadCount;
 exports.handleMarkRead = handleMarkRead;
@@ -35,6 +37,40 @@ function assertValid(req) {
     if (!errors.isEmpty()) {
         const fields = Object.fromEntries(errors.array().map((e) => ['path' in e ? e.path : 'field', e.msg]));
         throw new errors_1.ValidationError('Validation failed', fields);
+    }
+}
+const NOTIFICATION_TYPES = [
+    'like', 'comment', 'reply', 'follow', 'sale', 'order_update',
+    'system', 'message', 'broadcast', 'mention', 'review',
+];
+exports.updatePreferencesValidation = [
+    (0, express_validator_1.body)('push_enabled').optional().isBoolean(),
+    (0, express_validator_1.body)('email_enabled').optional().isBoolean(),
+    (0, express_validator_1.body)('ws_enabled').optional().isBoolean(),
+    (0, express_validator_1.body)('types_muted').optional().isArray(),
+    (0, express_validator_1.body)('types_muted.*').optional().isIn(NOTIFICATION_TYPES),
+];
+// GET /api/notifications/preferences
+async function handleGetPreferences(req, res, next) {
+    try {
+        const userId = req.auth.sub;
+        const preferences = await notification_service_1.notificationService.getPreferences(userId);
+        res.json({ success: true, data: preferences });
+    }
+    catch (err) {
+        next(err);
+    }
+}
+// PATCH /api/notifications/preferences
+async function handleUpdatePreferences(req, res, next) {
+    try {
+        assertValid(req);
+        const userId = req.auth.sub;
+        const preferences = await notification_service_1.notificationService.updatePreferences(userId, req.body);
+        res.json({ success: true, data: preferences });
+    }
+    catch (err) {
+        next(err);
     }
 }
 // ── Handlers ─────────────────────────────────────────────────────────────────

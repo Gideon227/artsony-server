@@ -29,7 +29,9 @@ const wallet_routes_1 = require("./modules/wallet/routes/wallet.routes");
 const review_routes_1 = require("./modules/review/routes/review.routes");
 const analytics_routes_1 = require("./modules/analytics/routes/analytics.routes");
 const follow_route_1 = require("./modules/follow/routes/follow.route");
+const block_routes_1 = require("./modules/block/routes/block.routes");
 const comment_route_1 = require("./modules/comments/routes/comment.route");
+const moodboard_routes_1 = require("./modules/moodboards/routes/moodboard.routes");
 // Middleware & Config
 const error_middleware_1 = require("./middleware/error.middleware");
 const rate_limit_middleware_1 = require("./middleware/rate-limit.middleware");
@@ -83,7 +85,10 @@ function createApp() {
     app.get('/health', (_req, res) => {
         res.json({ status: 'ok', ts: new Date().toISOString() });
     });
-    // ── Static Files ───────────────────────────────────────────────────────────
+    app.use('/uploads', (_req, res, next) => {
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        next();
+    });
     app.use('/uploads', express_1.default.static(path_1.default.join(process.cwd(), 'public', 'uploads')));
     // ── Routes ─────────────────────────────────────────────────────────────────
     app.use('/api', rate_limit_middleware_1.apiRateLimit); // Applies rate limiting to all /api routes defined below
@@ -103,7 +108,9 @@ function createApp() {
     app.use('/api/reviews', review_routes_1.reviewRouter);
     app.use('/api/analytics', analytics_routes_1.analyticsRouter);
     app.use('/api/follows', follow_route_1.followRouter);
+    app.use('/api/blocks', block_routes_1.blockRouter);
     app.use('/api/comments', comment_route_1.commentRouter);
+    app.use('/api/moodboards', moodboard_routes_1.moodboardRouter);
     // Note: In any specific router that needs onboarding protection, import and use:
     // router.use(requireAuth, requireOnboarded)
     // ── Fallthrough ────────────────────────────────────────────────────────────

@@ -70,7 +70,7 @@ exports.walletService = {
             void notification_service_1.notificationService.create({
                 recipientId: input.userId,
                 actorId: null,
-                type: 'system',
+                type: 'sale',
                 entityId: request.id,
                 entityType: 'withdrawal_request',
                 data: { body: `Your withdrawal request for ${request.amount} ${request.currency} has been received and is pending review.` },
@@ -142,7 +142,7 @@ exports.walletService = {
             void notification_service_1.notificationService.create({
                 recipientId: updated.user_id,
                 actorId: input.adminId,
-                type: 'system',
+                type: 'sale',
                 entityId: updated.id,
                 entityType: 'withdrawal_request',
                 data: { body: message },

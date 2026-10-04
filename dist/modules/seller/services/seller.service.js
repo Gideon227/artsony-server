@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.submitRegistration = submitRegistration;
 exports.getMyRegistration = getMyRegistration;
 exports.updateMyRegistration = updateMyRegistration;
+exports.updateDispatchAddress = updateDispatchAddress;
 exports.getRegistrationById = getRegistrationById;
 exports.listRegistrations = listRegistrations;
 exports.approveRegistration = approveRegistration;
@@ -62,6 +63,20 @@ async function updateMyRegistration(userId, input) {
     if (!existing)
         throw new errors_1.NotFoundError('Seller registration');
     throw new errors_1.AppError('Only a pending seller registration can be edited', 409, 'SELLER_REGISTRATION_NOT_PENDING');
+}
+// Distinct endpoint from the above — see updateDispatchAddressByUser's
+// comment for why this is scoped to APPROVED sellers and to
+// address-only fields.
+async function updateDispatchAddress(userId, input) {
+    const updated = await seller_repository_1.sellerRepository.updateDispatchAddressByUser(userId, input);
+    if (updated)
+        return updated;
+    const existing = await seller_repository_1.sellerRepository.findByUserId(userId);
+    if (!existing)
+        throw new errors_1.NotFoundError('Seller registration');
+    throw new errors_1.AppError(existing.status === 'PENDING'
+        ? 'Your seller application is still pending review — dispatch address updates are available once approved.'
+        : 'Dispatch address can only be updated for an approved seller account.', 409, 'SELLER_NOT_APPROVED');
 }
 // ── Admin: read ────────────────────────────────────────────────────────────────
 async function getRegistrationById(id) {

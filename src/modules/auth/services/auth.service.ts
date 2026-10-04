@@ -20,9 +20,12 @@ import {
 } from './token.service'
 import {
   RedisKeys,
+  RedisTTL,
   redisSet,
   redisGet,
   redisIncr,
+  redisSetJson,
+  redisGetJson,
 } from '../../redis/redis.client'
 import {
   ConflictError,
@@ -188,6 +191,19 @@ export async function refreshTokens(input: {
 
   const blacklisted = await redisGet(RedisKeys.rtBlacklist(incomingHash))
   if (blacklisted) {
+    // A client can legitimately present the same refresh-token cookie twice
+    // in quick succession — multiple tabs open at once, or this page's own
+    // SessionBootstrap racing an API call's 401-triggered refresh. Both
+    // requests read the cookie before either's rotation lands, so the loser
+    // shows up here as a "blacklisted" hash a few hundred ms after the
+    // winner rotated it. Within a short grace window we hand back the exact
+    // tokens the winner already issued instead of treating this as replay —
+    // genuine reuse of a stale token (a real attacker, or a client replaying
+    // a cookie from well before its last legitimate refresh) will never have
+    // a grace-cache entry, so detection for that case is unchanged below.
+    const graced = await redisGetJson<TokenPair>(RedisKeys.rtGrace(incomingHash))
+    if (graced) return graced
+
     const session = await sessionRepository.findByTokenHash(incomingHash)
     if (session) {
       await sessionRepository.revokeAllForUser(session['user_id'])
@@ -229,9 +245,16 @@ export async function refreshTokens(input: {
     tokenVersion: user['token_version'],
   })
 
+  const tokens: TokenPair = { accessToken, refreshToken: newRaw, sessionId: newSession['id'] }
+
+  // Let a near-simultaneous second request for the same (now-rotated) hash
+  // replay this exact result instead of being treated as reuse — see the
+  // comment above the blacklist check.
+  await redisSetJson(RedisKeys.rtGrace(incomingHash), tokens, RedisTTL.rtGraceWindow)
+
   auditRepository.log(buildAudit('AUTH_REFRESH', user['id'], input.ctx))
 
-  return { accessToken, refreshToken: newRaw, sessionId: newSession['id'] }
+  return tokens
 }
 
 // ─── Logout ───────────────────────────────────────────────────────────────────

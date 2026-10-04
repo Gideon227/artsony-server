@@ -1,18 +1,13 @@
 import { v2 as cloudinary, UploadApiOptions } from 'cloudinary';
-import { config } from '../../../config'; // Assuming this loads your .env
+import { config } from '../../../config';
 
-const cloudName = process.env['CLOUDINARY_CLOUD_NAME'];
-const apiKey = process.env['CLOUDINARY_API_KEY'];
-const apiSecret = process.env['CLOUDINARY_API_SECRET'];
-
-if (!cloudName || !apiKey || !apiSecret) {
-  console.warn('[Cloudinary] Missing environment variables. Uploads will fail.');
-}
-
+// config.cloudinary.* is populated via require_env() — the process will
+// already have failed to start if these are missing, so no runtime
+// guard/warning is needed here (see config/index.ts).
 cloudinary.config({
-  cloud_name: cloudName as string,
-  api_key: apiKey as string,
-  api_secret: apiSecret as string,
+  cloud_name: config.cloudinary.cloudName,
+  api_key: config.cloudinary.apiKey,
+  api_secret: config.cloudinary.apiSecret,
 });
 
 export interface CloudinaryUploadResult {

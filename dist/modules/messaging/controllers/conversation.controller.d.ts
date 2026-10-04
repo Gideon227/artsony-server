@@ -9,5 +9,6 @@ export declare function handleSearchConversations(req: Request, res: Response, n
 export declare function handleGetConversation(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleUpdateConversation(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleMuteConversation(req: Request, res: Response, next: NextFunction): Promise<void>;
+export declare function handleMarkUnread(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleLeaveConversation(req: Request, res: Response, next: NextFunction): Promise<void>;
 //# sourceMappingURL=conversation.controller.d.ts.map

@@ -8,7 +8,11 @@ export declare const messageRepository: {
         replyToId: string | null;
         metadata: MessageMetadata;
         isBroadcastRoot?: boolean;
-    }): Promise<Message>;
+        clientMessageId?: string;
+    }): Promise<{
+        message: Message;
+        deduped: boolean;
+    }>;
     findById(id: string): Promise<Message | undefined>;
     findByIdWithSender(id: string): Promise<MessageWithSender | undefined>;
     listForConversation(input: {

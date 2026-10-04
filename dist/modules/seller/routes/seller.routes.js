@@ -23,6 +23,10 @@ router.get('/me', seller_controller_1.handleGetMyRegistration);
 // PATCH /api/seller-registrations/me
 //      Edit my own registration while it is still PENDING
 router.patch('/me', seller_controller_1.updateRegistrationValidation, seller_controller_1.handleUpdateMyRegistration);
+// PATCH /api/sellers/me/dispatch-address — for an already-APPROVED seller
+// to update where their physical inventory ships from. Distinct from the
+// route above, which only works while the application is still PENDING.
+router.patch('/me/dispatch-address', seller_controller_1.updateDispatchAddressValidation, seller_controller_1.handleUpdateDispatchAddress);
 // ── Admin routes ─────────────────────────────────────────────────────────────
 // GET  /api/seller-registrations/admin
 //      Paginated, filterable list of all registrations

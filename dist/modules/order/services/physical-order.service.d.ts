@@ -141,7 +141,7 @@ export declare const physicalOrderService: {
         } | null;
     }>;
     listForBuyer(buyerId: string, view: BuyerOrderView, filters: PhysicalOrderFilters): Promise<{
-        data: OrderItemPhysical[];
+        data: import("../../../common/types/commerce.types").OrderItemPhysicalListEntry[];
         total: number;
         page: number;
         limit: number;
@@ -150,7 +150,7 @@ export declare const physicalOrderService: {
         has_prev: boolean;
     }>;
     listForArtist(sellerId: string, view: ArtistOrderView, filters: PhysicalOrderFilters): Promise<{
-        data: OrderItemPhysical[];
+        data: import("../../../common/types/commerce.types").OrderItemPhysicalListEntry[];
         total: number;
         page: number;
         limit: number;
@@ -159,7 +159,7 @@ export declare const physicalOrderService: {
         has_prev: boolean;
     }>;
     adminList(filters: PhysicalOrderFilters): Promise<{
-        data: OrderItemPhysical[];
+        data: import("../../../common/types/commerce.types").OrderItemPhysicalListEntry[];
         total: number;
         page: number;
         limit: number;

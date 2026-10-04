@@ -4,6 +4,9 @@ exports.cartService = void 0;
 const cart_repository_1 = require("../repositories/cart.repository");
 const artwork_repository_1 = require("../../../modules/artwork/repositories/artwork.repository");
 const artwork_service_1 = require("../../../modules/artwork/services/artwork.service");
+const user_repository_1 = require("../../../modules/auth/repositories/user.repository");
+const block_repository_1 = require("../../../modules/block/repositories/block.repository");
+const privacy_util_1 = require("../../../common/utils/privacy.util");
 const redis_client_1 = require("../../../modules/redis/redis.client");
 const errors_1 = require("../../../common/errors");
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -120,6 +123,21 @@ exports.cartService = {
             throw new errors_1.AppError('Artwork is not available for purchase', 404, 'ARTWORK_NOT_PURCHASABLE');
         }
         (0, artwork_service_1.enforceIsPurchasable)(artwork);
+        // 1b. Purchase-privacy + block enforcement — the actual point-of-sale
+        // gate is the checkout validation below (validateForCheckout), but
+        // checking here too gives immediate feedback instead of letting a
+        // blocked/restricted item sit in the cart until checkout fails.
+        if (artwork.creator_id !== userId) {
+            const [blocked, settings] = await Promise.all([
+                block_repository_1.blockRepository.isBlockedEitherDirection(userId, artwork.creator_id),
+                user_repository_1.userRepository.getPrivacySettings(artwork.creator_id),
+            ]);
+            if (blocked)
+                throw new errors_1.ForbiddenError('You cannot purchase this artwork');
+            const allowed = await (0, privacy_util_1.isInteractionAllowed)(settings.who_can_purchase, userId, artwork.creator_id);
+            if (!allowed)
+                throw new errors_1.ForbiddenError('This artist limits who can purchase their artwork');
+        }
         // 2. Variant resolution
         let resolvedOption = null;
         let variantSnapshot = null;
@@ -273,6 +291,22 @@ exports.cartService = {
                 throw new errors_1.AppError(`Artwork "${item.artwork.title}" is no longer available for purchase`, 422, 'ARTWORK_NOT_PURCHASABLE');
             }
             (0, artwork_service_1.enforceIsPurchasable)(artwork);
+            // Actual point-of-sale gate — re-checked here regardless of the
+            // add-to-cart check above, since an artist could tighten their
+            // privacy setting or block the buyer after the item was added.
+            if (artwork.creator_id !== userId) {
+                const [blocked, settings] = await Promise.all([
+                    block_repository_1.blockRepository.isBlockedEitherDirection(userId, artwork.creator_id),
+                    user_repository_1.userRepository.getPrivacySettings(artwork.creator_id),
+                ]);
+                if (blocked) {
+                    throw new errors_1.AppError(`Cannot purchase "${item.artwork.title}"`, 403, 'PURCHASE_BLOCKED');
+                }
+                const allowed = await (0, privacy_util_1.isInteractionAllowed)(settings.who_can_purchase, userId, artwork.creator_id);
+                if (!allowed) {
+                    throw new errors_1.AppError(`The artist behind "${item.artwork.title}" limits who can purchase their artwork`, 403, 'PURCHASE_NOT_ALLOWED');
+                }
+            }
             // Re-resolve variant
             let option = null;
             if (item.variant_snapshot) {

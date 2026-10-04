@@ -54,10 +54,27 @@ async function removeArtworkFromMoodboard(id, userId, artworkId) {
         throw new errors_1.ForbiddenError('Not authorized to modify this moodboard');
     await moodboard_repository_1.moodboardRepository.removeArtwork(id, artworkId);
 }
-async function getMoodboard(id) {
+async function getMoodboard(id, requesterId) {
     const moodboard = await moodboard_repository_1.moodboardRepository.findById(id);
     if (!moodboard)
         throw new errors_1.NotFoundError('Moodboard');
-    return moodboard;
+    if (moodboard.user_id !== requesterId)
+        throw new errors_1.ForbiddenError('Not authorized to view this moodboard');
+    // The raw join returns bare artwork rows. Re-read them through the artwork
+    // repository so each one carries its creator and the viewer's like/save
+    // state, in the order they were added, minus anything deleted or no
+    // longer visible to the viewer.
+    const artworkIds = await moodboard_repository_1.moodboardRepository.findArtworkIds(id);
+    const artworks = await artwork_repository_1.artworkRepository.findManyByIdsOrdered(artworkIds, requesterId);
+    return {
+        ...moodboard,
+        artworks: artworks.filter((artwork) => {
+            if (artwork.deleted_at)
+                return false;
+            if (artwork.visibility === 'PUBLIC' && artwork.status === 'PUBLISHED')
+                return true;
+            return artwork.creator_id === requesterId || artwork.collaborator_ids.includes(requesterId);
+        }),
+    };
 }
 //# sourceMappingURL=moodboard.service.js.map

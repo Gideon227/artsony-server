@@ -6,6 +6,7 @@ export declare const sellerRepository: {
     list(filters: SellerRegistrationFilters): Promise<PaginatedResult<SellerRegistration>>;
     submit(userId: string, input: SubmitSellerRegistrationInput): Promise<SellerRegistration>;
     updatePendingByUser(userId: string, input: UpdateSellerRegistrationInput): Promise<SellerRegistration | undefined>;
+    updateDispatchAddressByUser(userId: string, input: Partial<Pick<SellerRegistration, "address" | "state" | "country" | "postal_code" | "phone_number">>): Promise<SellerRegistration | undefined>;
     transition(registrationId: string, newStatus: SellerRegistrationStatus, adminId: string, notes?: string): Promise<SellerRegistration>;
 };
 //# sourceMappingURL=seller.repository.d.ts.map

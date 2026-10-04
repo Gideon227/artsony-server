@@ -53,11 +53,29 @@ exports.messageRepository = {
             reply_to_id: input.replyToId,
             metadata: input.metadata,
             is_broadcast_root: input.isBroadcastRoot ?? false,
+            client_message_id: input.clientMessageId ?? null,
         })
             .select('*')
             .single();
+        // Unique violation on client_message_id means a concurrent request for
+        // the same client-generated id already won the race and persisted the
+        // message first (see messages_client_message_id_uidx). This is the
+        // authoritative de-dup guard — the Redis idempotency key in
+        // messageService.send() is only a fast-path optimization and has a
+        // window where two concurrent requests can both observe 'pending' and
+        // both reach this insert. Treat this as a successful dedupe, not an
+        // error: fetch and return the row that actually won.
+        if (result.error?.code === '23505' && input.clientMessageId) {
+            const existing = await (0, database_1.supabase)()
+                .from('messages')
+                .select('*')
+                .eq('client_message_id', input.clientMessageId)
+                .single();
+            (0, database_1.assertNoError)(existing, 'MessageRepo:create:dedupeLookup');
+            return { message: toMessage(existing.data), deduped: true };
+        }
         (0, database_1.assertNoError)(result, 'MessageRepo:create');
-        return toMessage(result.data);
+        return { message: toMessage(result.data), deduped: false };
     },
     // ── Find a single message by id ───────────────────────────────────────────
     async findById(id) {

@@ -4,12 +4,29 @@ exports.commentService = void 0;
 const comment_repository_1 = require("../repositories/comment.repository");
 const notification_service_1 = require("../../../modules/messaging/services/notification.service");
 const artwork_repository_1 = require("../../../modules/artwork/repositories/artwork.repository");
+const user_repository_1 = require("../../../modules/auth/repositories/user.repository");
+const block_repository_1 = require("../../../modules/block/repositories/block.repository");
+const privacy_util_1 = require("../../../common/utils/privacy.util");
 const errors_1 = require("../../../common/errors");
 exports.commentService = {
     async create(input, userId) {
         const artwork = await artwork_repository_1.artworkRepository.findById(input.artwork_id);
         if (!artwork)
             throw new errors_1.NotFoundError('Artwork');
+        if (!artwork.allow_comments) {
+            throw new errors_1.ForbiddenError('Comments are turned off for this artwork');
+        }
+        if (artwork.creator_id !== userId) {
+            const [blocked, settings] = await Promise.all([
+                block_repository_1.blockRepository.isBlockedEitherDirection(userId, artwork.creator_id),
+                user_repository_1.userRepository.getPrivacySettings(artwork.creator_id),
+            ]);
+            if (blocked)
+                throw new errors_1.ForbiddenError('You cannot comment on this artwork');
+            const allowed = await (0, privacy_util_1.isInteractionAllowed)(settings.who_can_comment, userId, artwork.creator_id);
+            if (!allowed)
+                throw new errors_1.ForbiddenError('This artist limits who can comment on their artwork');
+        }
         let parentRecipientId;
         if (input.parent_id) {
             const parent = await comment_repository_1.commentRepository.getById(input.parent_id);

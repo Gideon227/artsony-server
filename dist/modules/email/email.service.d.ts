@@ -36,5 +36,12 @@ export declare const emailService: {
         displayName: string;
         scheduledAt: Date;
     }): Promise<void>;
+    sendDigitalDeliveryEmail(input: {
+        to: string;
+        orderId: string;
+        items: Array<{
+            artwork_title: string;
+        }>;
+    }): Promise<void>;
 };
 //# sourceMappingURL=email.service.d.ts.map

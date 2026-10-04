@@ -5,6 +5,9 @@ const conversation_repository_1 = require("../repositories/conversation.reposito
 const message_repository_1 = require("../repositories/message.repository");
 const redis_client_1 = require("../../../modules/redis/redis.client");
 const connection_manager_1 = require("../../../modules/ws/connection-manager");
+const user_repository_1 = require("../../../modules/auth/repositories/user.repository");
+const block_repository_1 = require("../../../modules/block/repositories/block.repository");
+const privacy_util_1 = require("../../../common/utils/privacy.util");
 const errors_1 = require("../../../common/errors");
 // ── Cache TTLs ───────────────────────────────────────────────────────────────
 const PARTICIPANTS_CACHE_TTL = 5 * 60; // 5 minutes
@@ -15,6 +18,15 @@ exports.conversationService = {
         if (input.initiator_id === input.recipient_id) {
             throw new errors_1.ValidationError('Cannot start a conversation with yourself');
         }
+        const [blocked, settings] = await Promise.all([
+            block_repository_1.blockRepository.isBlockedEitherDirection(input.initiator_id, input.recipient_id),
+            user_repository_1.userRepository.getPrivacySettings(input.recipient_id),
+        ]);
+        if (blocked)
+            throw new errors_1.ForbiddenError('You cannot message this user');
+        const allowed = await (0, privacy_util_1.isInteractionAllowed)(settings.who_can_message, input.initiator_id, input.recipient_id);
+        if (!allowed)
+            throw new errors_1.ForbiddenError('This user limits who can message them');
         // The RPC is atomic — safe for concurrent requests
         const convId = await conversation_repository_1.conversationRepository.getOrCreateDirect(input.initiator_id, input.recipient_id);
         // Subscribe both users to the conversation channel if they are connected
@@ -80,10 +92,15 @@ exports.conversationService = {
             .map((c) => c.last_message_id)
             .filter((id) => id !== null);
         const previews = await message_repository_1.messageRepository.getPreviews(messageIds);
+        // Batch fetch the other participant's profile for direct conversations —
+        // powers the avatar/display name shown in the conversation list and thread header.
+        const directIds = conversations.filter((c) => c.type === 'direct').map((c) => c.id);
+        const otherUserMap = await conversation_repository_1.conversationRepository.getOtherParticipants(directIds, input.user_id);
         const enriched = conversations.map((c) => ({
             ...c,
             unread_count: unreadMap.get(c.id) ?? 0,
             last_message: c.last_message_id ? (previews.get(c.last_message_id) ?? null) : null,
+            other_user: otherUserMap.get(c.id) ?? null,
         }));
         const hasMore = enriched.length === limit;
         const nextCursor = hasMore && enriched.length > 0
@@ -106,10 +123,24 @@ exports.conversationService = {
             .map((c) => c.last_message_id)
             .filter((id) => id !== null);
         const previews = await message_repository_1.messageRepository.getPreviews(messageIds);
+        const directIds = results.filter((c) => c.type === 'direct').map((c) => c.id);
+        const [otherUserMap, muteMap] = await Promise.all([
+            conversation_repository_1.conversationRepository.getOtherParticipants(directIds, input.user_id),
+            conversation_repository_1.conversationRepository.getMyMuteStates(results.map((c) => c.id), input.user_id),
+        ]);
         return results.map((c) => ({
             ...c,
             last_message: c.last_message_id ? (previews.get(c.last_message_id) ?? null) : null,
+            other_user: otherUserMap.get(c.id) ?? null,
+            is_muted: muteMap.get(c.id) ?? false,
         }));
+    },
+    // ── Mark a conversation unread for the current user ────────────────────────
+    async markUnread(conversationId, userId) {
+        const isParticipant = await conversation_repository_1.conversationRepository.isParticipant(conversationId, userId);
+        if (!isParticipant)
+            throw new errors_1.ForbiddenError('Not a participant of this conversation');
+        await conversation_repository_1.conversationRepository.markUnread(conversationId, userId);
     },
     // ── Update conversation title/metadata ────────────────────────────────────
     async update(conversationId, userId, input) {

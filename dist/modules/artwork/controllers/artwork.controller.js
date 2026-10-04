@@ -33,14 +33,16 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.reportArtworkValidation = exports.purchasableArtworkValidation = exports.getTopPicksValidation = exports.featuredArtworksValidation = exports.getFeedValidation = exports.listArtworksValidation = exports.flagArtworkValidation = exports.updateArtworkValidation = exports.createArtworkValidation = void 0;
+exports.reportArtworkValidation = exports.purchasableArtworkValidation = exports.getLocationsValidation = exports.getTrendingValidation = exports.getTopPicksValidation = exports.featuredArtworksValidation = exports.getFeedValidation = exports.trackViewValidation = exports.listArtworksValidation = exports.flagArtworkValidation = exports.updateArtworkValidation = exports.createArtworkValidation = void 0;
 exports.handleCreateArtwork = handleCreateArtwork;
 exports.handleGetArtwork = handleGetArtwork;
+exports.handleTrackView = handleTrackView;
 exports.handleToggleLike = handleToggleLike;
 exports.handleGetArtworkBySlug = handleGetArtworkBySlug;
 exports.handleGetFeed = handleGetFeed;
 exports.handleGetFeaturedArtworks = handleGetFeaturedArtworks;
 exports.handleGetTopPicks = handleGetTopPicks;
+exports.handleGetTrending = handleGetTrending;
 exports.handleGetLocations = handleGetLocations;
 exports.handleGetSizeLabels = handleGetSizeLabels;
 exports.handleListArtworks = handleListArtworks;
@@ -155,6 +157,9 @@ exports.createArtworkValidation = [
         .withMessage('max_purchase_quantity must be a positive integer'),
     (0, express_validator_1.body)('has_variants')
         .optional().isBoolean(),
+    (0, express_validator_1.body)('license_type')
+        .optional().isIn(['attribution', 'attribution-sharealike', 'attribution-derivs', 'attribution-non-commercial'])
+        .withMessage('license_type must be one of the supported license options'),
     ...assetValidation,
     ...variantValidation,
     ...physicalValidation,
@@ -192,6 +197,9 @@ exports.updateArtworkValidation = [
     (0, express_validator_1.body)('max_purchase_quantity')
         .optional().isInt({ min: 1 }),
     (0, express_validator_1.body)('has_variants').optional().isBoolean(),
+    (0, express_validator_1.body)('license_type')
+        .optional().isIn(['attribution', 'attribution-sharealike', 'attribution-derivs', 'attribution-non-commercial'])
+        .withMessage('license_type must be one of the supported license options'),
     ...assetValidation,
     ...variantValidation,
     ...physicalValidation,
@@ -221,7 +229,9 @@ exports.listArtworksValidation = [
     (0, express_validator_1.query)('search').optional().isString().trim().isLength({ max: 200 }),
     (0, express_validator_1.query)('categories').optional(),
     (0, express_validator_1.query)('creator_id').optional().isUUID(),
-    (0, express_validator_1.query)('location').optional().isString().trim().isLength({ max: 100 }),
+    (0, express_validator_1.query)('country').optional().isString().trim().isLength({ min: 2, max: 2 }),
+    (0, express_validator_1.query)('state').optional().isString().trim().isLength({ max: 100 }),
+    (0, express_validator_1.query)('city').optional().isString().trim().isLength({ max: 100 }),
     (0, express_validator_1.query)('size_label').optional().isString().trim().isLength({ max: 50 }),
 ];
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -276,6 +286,26 @@ async function handleGetArtwork(req, res, next) {
         next(err);
     }
 }
+// POST /api/artworks/:id/view — explicit view tracking for surfaces that
+// already have the artwork in hand (e.g. artwork-view-overlay, which
+// receives `artwork` as a prop from an already-loaded feed/list query and
+// never calls GET /:id, so the trackView() side-effect on that route never
+// fired for real browsing). Same trackView()/Redis-dedup path as GET /:id —
+// this just gives callers a way to trigger it without a full refetch.
+exports.trackViewValidation = [(0, express_validator_1.param)('id').isUUID()];
+async function handleTrackView(req, res, next) {
+    try {
+        assertValid(req);
+        const { id } = req.params;
+        const ctx = (0, error_middleware_1.extractRequestContext)(req);
+        const identity = req.auth?.sub ?? ctx.ipAddress ?? 'anonymous';
+        await artworkService.trackView(id, identity);
+        res.status(204).end();
+    }
+    catch (err) {
+        next(err);
+    }
+}
 async function handleToggleLike(req, res, next) {
     try {
         if (!req.auth)
@@ -308,8 +338,12 @@ exports.getFeedValidation = [
     (0, express_validator_1.query)('page').optional().isInt({ min: 1 }).toInt(),
     (0, express_validator_1.query)('limit').optional().isInt({ min: 1, max: 50 }).toInt(),
     (0, express_validator_1.query)('categories').optional(),
-    (0, express_validator_1.query)('location').optional().isString().trim().isLength({ max: 100 }),
+    (0, express_validator_1.query)('country').optional().isString().trim().isLength({ min: 2, max: 2 }),
+    (0, express_validator_1.query)('state').optional().isString().trim().isLength({ max: 100 }),
+    (0, express_validator_1.query)('city').optional().isString().trim().isLength({ max: 100 }),
     (0, express_validator_1.query)('size_label').optional().isString().trim().isLength({ max: 50 }),
+    (0, express_validator_1.query)('listing_type').optional().isIn(['MARKETPLACE', 'PORTFOLIO']),
+    (0, express_validator_1.query)('artwork_format').optional().isIn(['DIGITAL', 'PHYSICAL']),
 ];
 async function handleGetFeed(req, res, next) {
     try {
@@ -322,8 +356,12 @@ async function handleGetFeed(req, res, next) {
             ...(q['categories']
                 ? { categories: Array.isArray(q['categories']) ? q['categories'] : [q['categories']] }
                 : {}),
-            ...(q['location'] ? { location: q['location'] } : {}),
+            ...(q['country'] ? { country: q['country'] } : {}),
+            ...(q['state'] ? { state: q['state'] } : {}),
+            ...(q['city'] ? { city: q['city'] } : {}),
             ...(q['size_label'] ? { size_label: q['size_label'] } : {}),
+            ...(q['listing_type'] ? { listing_type: q['listing_type'] } : {}),
+            ...(q['artwork_format'] ? { artwork_format: q['artwork_format'] } : {}),
         };
         const result = await artworkService.getFeed(mode, filters, req.auth?.sub);
         res.json({ success: true, ...result });
@@ -366,9 +404,41 @@ async function handleGetTopPicks(req, res, next) {
         next(err);
     }
 }
-async function handleGetLocations(_req, res, next) {
+// GET /api/artworks/trending — "trending regardless of upload date" (see
+// getTrendingArtworks in artwork.service.ts). Distinct from /top-picks?
+// period=week, which is scoped to artworks *uploaded* in the window.
+exports.getTrendingValidation = [
+    (0, express_validator_1.query)('limit').optional().isInt({ min: 1, max: 20 }).toInt(),
+    (0, express_validator_1.query)('windowDays').optional().isInt({ min: 1, max: 90 }).toInt(),
+    (0, express_validator_1.query)('listingType').optional().isIn(['MARKETPLACE', 'PORTFOLIO']),
+];
+async function handleGetTrending(req, res, next) {
     try {
-        const data = await artworkService.getLocations();
+        assertValid(req);
+        const limit = req.query['limit'] ?? 8;
+        const windowDays = req.query['windowDays'] ?? 7;
+        const listingType = req.query['listingType'];
+        const data = await artworkService.getTrendingArtworks(limit, windowDays, listingType);
+        res.json({ success: true, data });
+    }
+    catch (err) {
+        next(err);
+    }
+}
+exports.getLocationsValidation = [
+    (0, express_validator_1.query)('level').isIn(['country', 'state', 'city']),
+    (0, express_validator_1.query)('country').optional().isString().trim().isLength({ min: 2, max: 2 }),
+    (0, express_validator_1.query)('state').optional().isString().trim().isLength({ max: 100 }),
+];
+async function handleGetLocations(req, res, next) {
+    try {
+        assertValid(req);
+        const q = req.query;
+        const level = q['level'];
+        const data = await artworkService.getLocations(level, {
+            ...(q['country'] ? { country: q['country'].toUpperCase() } : {}),
+            ...(q['state'] ? { state: q['state'] } : {}),
+        });
         res.json({ success: true, data });
     }
     catch (err) {
@@ -409,7 +479,9 @@ async function handleListArtworks(req, res, next) {
                         : [q['categories']],
                 }
                 : {}),
-            ...(q['location'] ? { location: q['location'] } : {}),
+            ...(q['country'] ? { country: q['country'] } : {}),
+            ...(q['state'] ? { state: q['state'] } : {}),
+            ...(q['city'] ? { city: q['city'] } : {}),
             ...(q['size_label'] ? { size_label: q['size_label'] } : {}),
         };
         const result = await artworkService.listArtworks(filters, req.auth?.sub, req.auth?.role);
