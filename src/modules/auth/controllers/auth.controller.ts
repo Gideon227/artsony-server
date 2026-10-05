@@ -45,6 +45,7 @@ function clearRefreshCookie(res: Response): void {
     httpOnly: true,
     secure: config.cookie.secure,
     sameSite: config.cookie.sameSite,
+    domain: config.cookie.domain,
     path: '/api/auth',
   })
 }

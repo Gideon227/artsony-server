@@ -22,7 +22,9 @@ import {
   RedisKeys,
   RedisTTL,
   redisSet,
+  redisSetNx,
   redisGet,
+  redisDel,
   redisIncr,
   redisSetJson,
   redisGetJson,
@@ -183,78 +185,127 @@ async function handleFailedLogin(
 
 // ─── Refresh Token ────────────────────────────────────────────────────────────
 
+// The blacklist key doubles as the rotation lock: the first request to present
+// a refresh token claims it as ROTATING (SET NX), and once the new session and
+// the grace entry exist it is upgraded to CONSUMED. A request that loses the
+// claim is either racing that in-flight rotation — multi-tab, or a page's
+// bootstrap refresh overlapping an API call's 401 refresh — or replaying a
+// token consumed earlier. Only the first case may receive the winner's tokens.
+const RT_ROTATING = 'rotating'
+const RT_CONSUMED = '1'
+const RT_WAIT_TIMEOUT_MS = 5_000
+const RT_WAIT_POLL_MS = 50
+const RT_MAX_CLAIM_ATTEMPTS = 3
+
+type ConcurrentRefreshOutcome =
+  | { type: 'tokens'; tokens: TokenPair }
+  | { type: 'consumed' }
+  | { type: 'released' }
+  | { type: 'timeout' }
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// The marker is read before the grace entry on purpose: the winner writes the
+// grace entry before it upgrades the marker, so a marker that is no longer
+// ROTATING guarantees the grace entry is already visible to the read after it.
+async function waitForConcurrentRefresh(incomingHash: string): Promise<ConcurrentRefreshOutcome> {
+  const deadline = Date.now() + RT_WAIT_TIMEOUT_MS
+
+  for (;;) {
+    const marker = await redisGet(RedisKeys.rtBlacklist(incomingHash))
+    const graced = await redisGetJson<TokenPair>(RedisKeys.rtGrace(incomingHash))
+
+    if (graced) return { type: 'tokens', tokens: graced }
+    if (marker === null) return { type: 'released' }
+    if (marker !== RT_ROTATING) return { type: 'consumed' }
+    if (Date.now() >= deadline) return { type: 'timeout' }
+
+    await sleep(RT_WAIT_POLL_MS)
+  }
+}
+
+async function handleRefreshTokenReuse(incomingHash: string, ctx: AuthContext): Promise<never> {
+  const session = await sessionRepository.findByTokenHash(incomingHash)
+  if (session) {
+    await sessionRepository.revokeAllForUser(session['user_id'])
+    auditRepository.log(
+      buildAudit('AUTH_SUSPICIOUS_REFRESH', session['user_id'], ctx, {
+        reason: 'blacklisted_token_reuse',
+      })
+    )
+  }
+  throw new InvalidTokenError()
+}
+
+async function rotateRefreshToken(incomingHash: string, ctx: AuthContext): Promise<TokenPair> {
+  let rotated = false
+
+  try {
+    const session = await sessionRepository.findByTokenHash(incomingHash)
+    if (!session) throw new InvalidTokenError()
+
+    const user = await userRepository.findById(session['user_id'])
+    if (!user || user['status'] !== 'ACTIVE') throw new UnauthorizedError()
+
+    const { raw: newRaw, hash: newHash } = generateRefreshToken()
+
+    const newSession = await sessionRepository.rotate({
+      oldSessionId: session['id'],
+      userId: user['id'],
+      newTokenHash: newHash,
+      userAgent: ctx.userAgent,
+      ipAddress: ctx.ipAddress,
+    })
+    rotated = true
+
+    const accessToken = await signAccessToken({
+      userId: user['id'],
+      sessionId: newSession['id'],
+      role: user['role'],
+      tokenVersion: user['token_version'],
+    })
+
+    const tokens: TokenPair = { accessToken, refreshToken: newRaw, sessionId: newSession['id'] }
+
+    await redisSetJson(RedisKeys.rtGrace(incomingHash), tokens, RedisTTL.rtGraceWindow)
+    await redisSet(RedisKeys.rtBlacklist(incomingHash), RT_CONSUMED, config.jwt.refreshTokenTtl)
+
+    auditRepository.log(buildAudit('AUTH_REFRESH', user['id'], ctx))
+
+    return tokens
+  } catch (err) {
+    // Until the old session is actually rotated the token has not been
+    // consumed, so hand the claim back instead of poisoning a valid token.
+    if (!rotated) await redisDel(RedisKeys.rtBlacklist(incomingHash))
+    throw err
+  }
+}
+
 export async function refreshTokens(input: {
   rawRefreshToken: string
   ctx: AuthContext
 }): Promise<TokenPair> {
   const incomingHash = hashToken(input.rawRefreshToken)
 
-  const blacklisted = await redisGet(RedisKeys.rtBlacklist(incomingHash))
-  if (blacklisted) {
-    // A client can legitimately present the same refresh-token cookie twice
-    // in quick succession — multiple tabs open at once, or this page's own
-    // SessionBootstrap racing an API call's 401-triggered refresh. Both
-    // requests read the cookie before either's rotation lands, so the loser
-    // shows up here as a "blacklisted" hash a few hundred ms after the
-    // winner rotated it. Within a short grace window we hand back the exact
-    // tokens the winner already issued instead of treating this as replay —
-    // genuine reuse of a stale token (a real attacker, or a client replaying
-    // a cookie from well before its last legitimate refresh) will never have
-    // a grace-cache entry, so detection for that case is unchanged below.
-    const graced = await redisGetJson<TokenPair>(RedisKeys.rtGrace(incomingHash))
-    if (graced) return graced
+  for (let attempt = 0; attempt < RT_MAX_CLAIM_ATTEMPTS; attempt++) {
+    const claimed = await redisSetNx(
+      RedisKeys.rtBlacklist(incomingHash),
+      RT_ROTATING,
+      RedisTTL.rtClaim
+    )
+    if (claimed) return rotateRefreshToken(incomingHash, input.ctx)
 
-    const session = await sessionRepository.findByTokenHash(incomingHash)
-    if (session) {
-      await sessionRepository.revokeAllForUser(session['user_id'])
-      auditRepository.log(
-        buildAudit('AUTH_SUSPICIOUS_REFRESH', session['user_id'], input.ctx, {
-          reason: 'blacklisted_token_reuse',
-        })
-      )
-    }
-    throw new InvalidTokenError()
+    const outcome = await waitForConcurrentRefresh(incomingHash)
+    if (outcome.type === 'tokens') return outcome.tokens
+    if (outcome.type === 'consumed') return handleRefreshTokenReuse(incomingHash, input.ctx)
+    if (outcome.type === 'timeout') break
   }
 
-  const session = await sessionRepository.findByTokenHash(incomingHash)
-  if (!session) throw new InvalidTokenError()
-
-  const user = await userRepository.findById(session['user_id'])
-  if (!user || user['status'] !== 'ACTIVE') throw new UnauthorizedError()
-
-  const { raw: newRaw, hash: newHash } = generateRefreshToken()
-
-  await redisSet(
-    RedisKeys.rtBlacklist(incomingHash),
-    '1',
-    config.jwt.refreshTokenTtl
-  )
-
-  const newSession = await sessionRepository.rotate({
-    oldSessionId: session['id'],
-    userId: user['id'],
-    newTokenHash: newHash,
-    userAgent: input.ctx.userAgent,
-    ipAddress: input.ctx.ipAddress,
-  })
-
-  const accessToken = await signAccessToken({
-    userId: user['id'],
-    sessionId: newSession['id'],
-    role: user['role'],
-    tokenVersion: user['token_version'],
-  })
-
-  const tokens: TokenPair = { accessToken, refreshToken: newRaw, sessionId: newSession['id'] }
-
-  // Let a near-simultaneous second request for the same (now-rotated) hash
-  // replay this exact result instead of being treated as reuse — see the
-  // comment above the blacklist check.
-  await redisSetJson(RedisKeys.rtGrace(incomingHash), tokens, RedisTTL.rtGraceWindow)
-
-  auditRepository.log(buildAudit('AUTH_REFRESH', user['id'], input.ctx))
-
-  return tokens
+  // Not a replay: the rotation we raced is still unresolved (or kept failing),
+  // so this is a transient server-side condition and must not revoke sessions.
+  throw new Error('[Auth] Refresh rotation did not settle')
 }
 
 // ─── Logout ───────────────────────────────────────────────────────────────────

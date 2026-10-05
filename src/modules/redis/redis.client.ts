@@ -31,6 +31,7 @@ export const RedisTTL = {
   loginAttempts: 60 * 30,           // 30 min lockout window
   rtBlacklist: 60 * 60 * 24 * 30, // match refresh token lifetime
   rtGraceWindow: 10,                 // 10s — legitimate concurrent refresh reuse (multi-tab) vs. real replay
+  rtClaim: 30,                       // 30s — in-flight refresh rotation; expires on its own if the winner dies mid-rotation
 
   // Artwork
   artworkSingle: 60 * 5,            // 5 min — individual artwork
@@ -152,6 +153,15 @@ export async function redisSet(
   ttlSeconds: number,
 ): Promise<void> {
   await getRedis().set(key, value, 'EX', ttlSeconds)
+}
+
+export async function redisSetNx(
+  key: string,
+  value: string,
+  ttlSeconds: number,
+): Promise<boolean> {
+  const result = await getRedis().set(key, value, 'EX', ttlSeconds, 'NX')
+  return result === 'OK'
 }
 
 export async function redisGet(key: string): Promise<string | null> {
