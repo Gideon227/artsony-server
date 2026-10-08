@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express'
 import { body, query, param, validationResult } from 'express-validator'
 import { physicalOrderService } from '../services/physical-order.service'
 import { ValidationError } from '@/common/errors'
+import { CloudinaryService } from '@/modules/upload/services/cloudinary.service'
 import type { PhysicalOrderFilters, CourierServiceType, BuyerOrderView, ArtistOrderView } from '@/common/types/commerce.types'
 
 // ── Validation helper ─────────────────────────────────────────────────────────
@@ -471,6 +472,11 @@ export async function handleAddDeliveryProof(req: Request, res: Response, next: 
   } catch (err) { next(err) }
 }
 
+// Invoices and receipts are stored as `authenticated` Cloudinary assets, so
+// the stored URL is not fetchable on its own — hand out a short-lived signed
+// download URL instead.
+const PDF_DOWNLOAD_TTL_SEC = 300
+
 export async function handleDownloadInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     assertValid(req)
@@ -484,7 +490,8 @@ export async function handleDownloadInvoice(req: Request, res: Response, next: N
       res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'No invoice available for this order yet' })
       return
     }
-    res.json({ success: true, data: { invoice_url: view.invoice.pdf_url, version: view.invoice.version } })
+    const { url } = CloudinaryService.buildDownloadUrl(view.invoice.pdf_url, PDF_DOWNLOAD_TTL_SEC)
+    res.json({ success: true, data: { invoice_url: url, version: view.invoice.version } })
   } catch (err) { next(err) }
 }
 
@@ -504,7 +511,8 @@ export async function handleDownloadReceipt(req: Request, res: Response, next: N
       res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'No receipt available for this order yet' })
       return
     }
-    res.json({ success: true, data: { receipt_url: view.receipt.pdf_url } })
+    const { url } = CloudinaryService.buildDownloadUrl(view.receipt.pdf_url, PDF_DOWNLOAD_TTL_SEC)
+    res.json({ success: true, data: { receipt_url: url } })
   } catch (err) { next(err) }
 }
 

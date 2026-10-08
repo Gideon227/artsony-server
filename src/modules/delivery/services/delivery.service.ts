@@ -6,6 +6,7 @@ import { redisGetJson, redisSetJson, redisDel, RedisKeys, RedisTTL } from '@/mod
 import { AppError, ForbiddenError } from '@/common/errors'
 import type { DigitalDeliveryToken, DigitalDeliveryTokenWithArtwork, OrderItem } from '@/common/types/commerce.types'
 import { supabase } from '@/config/database'
+import { CloudinaryService } from '@/modules/upload/services/cloudinary.service'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -13,32 +14,6 @@ const TOKEN_EXPIRY_DAYS = 7
 const MAX_DOWNLOADS = 3
 const SIGNED_URL_TTL_SEC = 300
 const RAW_TOKEN_BYTES = 48
-
-// ── Cloudinary signed URL helper ──────────────────────────────────────────────
-// Generates a time-limited signed URL for the digital asset. The raw
-// Cloudinary URL is never exposed to the buyer — only this signed variant.
-// Signature uses HMAC-SHA1 per Cloudinary's authentication spec.
-
-function buildSignedCloudinaryUrl(
-  cloudinaryUrl: string,
-  expiresAt:     number,
-): string {
-  const cloudName  = process.env['CLOUDINARY_CLOUD_NAME'] ?? ''
-  const apiSecret  = process.env['CLOUDINARY_API_SECRET'] ?? ''
-
-  if (!cloudName || !apiSecret) return cloudinaryUrl
-
-  // Extract public_id from URL. Format:
-  // https://res.cloudinary.com/{cloud}/image/upload/v{version}/{public_id}.{ext}
-  const match = cloudinaryUrl.match(/\/upload\/(?:v\d+\/)?(.+)$/)
-  if (!match) return cloudinaryUrl
-
-  const publicId      = match[1]!.replace(/\.[^.]+$/, '') // strip extension
-  const toSign        = `timestamp=${expiresAt}&public_id=${publicId}${apiSecret}`
-  const signature     = crypto.createHash('sha1').update(toSign).digest('hex')
-
-  return `https://res.cloudinary.com/${cloudName}/image/upload/s--${signature}--/e_${expiresAt}/${publicId}`
-}
 
 // ── Service ───────────────────────────────────────────────────────────────────
 
@@ -185,16 +160,21 @@ export const deliveryService = {
       throw new AppError('Digital file is not available', 404, 'DIGITAL_FILE_NOT_FOUND')
     }
 
+    // Time-limited Cloudinary download URL for the stored original. The raw
+    // asset URL is never exposed to the buyer — only this signed variant.
+    // Built before the download is recorded so a failure here doesn't use up
+    // one of the buyer's downloads.
+    const download  = CloudinaryService.buildDownloadUrl(primaryAsset['original_url'], SIGNED_URL_TTL_SEC)
+
     await deliveryRepository.recordDownload(tokenRecord.id)
 
-    const urlExpiry  = Math.floor(Date.now() / 1000) + SIGNED_URL_TTL_SEC
-    const signedUrl  = buildSignedCloudinaryUrl(primaryAsset['original_url'], urlExpiry)
-    const filename   = `${artworkResult.data['slug']}-artsony.${primaryAsset['mime_type']?.split('/')[1] ?? 'jpg'}`
+    const extension = download.format ?? primaryAsset['mime_type']?.split('/')[1] ?? 'jpg'
+    const filename  = `${artworkResult.data['slug']}-artsony.${extension}`
 
     return {
-      signed_url: signedUrl,
+      signed_url: download.url,
       filename,
-      expires_at: new Date(urlExpiry * 1000),
+      expires_at: download.expiresAt,
     }
   },
 

@@ -34,11 +34,20 @@ const assetValidation = [
   body('assets.*.original_url')
     .isURL({ require_tld: isProduction, require_protocol: true, protocols: isProduction ? ['https'] : ['http', 'https'] })
     .withMessage('Each asset must have a valid HTTPS original_url'),
+  body('assets.*.optimized_url')
+    .optional({ nullable: true })
+    .isURL({ require_tld: isProduction, require_protocol: true, protocols: isProduction ? ['https'] : ['http', 'https'] })
+    .withMessage('optimized_url must be a valid HTTPS URL'),
+  body('assets.*.thumbnail_url')
+    .optional({ nullable: true })
+    .isURL({ require_tld: isProduction, require_protocol: true, protocols: isProduction ? ['https'] : ['http', 'https'] })
+    .withMessage('thumbnail_url must be a valid HTTPS URL'),
   body('assets.*.media_type')
-    .isIn(['IMAGE', 'VIDEO', 'THREE_D', 'EXTERNAL_LINK'])
+    .isIn(['IMAGE', 'VIDEO', 'THREE_D', 'EXTERNAL_LINK', 'PDF'])
     .withMessage('Invalid asset media_type'),
   body('assets.*.mime_type').isString().notEmpty().withMessage('mime_type is required'),
-  body('assets.*.file_size_bytes').isInt({ min: 1 }).withMessage('file_size_bytes must be a positive integer'),
+  body('assets.*.public_id').optional({ nullable: true }).isString().isLength({ max: 400 }),
+  body('assets.*.file_size_bytes').isInt({ min: 0 }).withMessage('file_size_bytes must be a non-negative integer'),
   body('assets.*.ordering_index').optional().isInt({ min: 0 }),
   body('assets.*.width').optional().isInt({ min: 1 }),
   body('assets.*.height').optional().isInt({ min: 1 }),
@@ -73,7 +82,12 @@ const physicalValidation = [
 
 // ── Exported validation chains ─────────────────────────────────────────────────
 
+// A draft may hold anything from nothing to a nearly finished artwork, so the
+// create endpoint only checks the shape of what is sent. Whether an artwork is
+// complete enough to go live is decided when it is published (see
+// artworkService.publishArtwork).
 export const createArtworkValidation = [
+  body('id').optional().isUUID().withMessage('id must be a valid UUID'),
   body('listing_type')
     .isIn(['MARKETPLACE', 'PORTFOLIO'])
     .withMessage('listing type must be MARKETPLACE or PORTFOLIO'),
@@ -81,11 +95,11 @@ export const createArtworkValidation = [
     .isIn(['DIGITAL', 'PHYSICAL'])
     .withMessage('artwork format must be DIGITAL or PHYSICAL'),
   body('title')
-    .isString().trim().isLength({ min: 1, max: 300 })
-    .withMessage('title must be 1–300 characters'),
+    .optional().isString().trim().isLength({ max: 300 })
+    .withMessage('title must be at most 300 characters'),
   body('description')
-    .isString().trim().isLength({ min: 1, max: 10000 })
-    .withMessage('description must be 1–10000 characters'),
+    .optional().isString().trim().isLength({ max: 10000 })
+    .withMessage('description must be at most 10000 characters'),
   body('categories')
     .optional().isArray({ max: 20 })
     .withMessage('categories must be an array of up to 20 items'),
@@ -125,6 +139,9 @@ export const createArtworkValidation = [
   body('license_type')
     .optional().isIn(['attribution', 'attribution-sharealike', 'attribution-derivs', 'attribution-non-commercial'])
     .withMessage('license_type must be one of the supported license options'),
+  body('status')
+    .optional().isIn(['DRAFT', 'PUBLISHED'])
+    .withMessage('status must be DRAFT or PUBLISHED'),
   ...assetValidation,
   ...variantValidation,
   ...physicalValidation,
@@ -217,10 +234,11 @@ export async function handleCreateArtwork(
     const body = req.body as Record<string, any>
 
     const input: CreateArtworkInput = {
+      ...(body['id'] !== undefined ? { id: String(body['id']) } : {}),
       listing_type: body['listing_type'] as ListingType,
       artwork_format: body['artwork_format'] as ArtworkFormat,
-      title: String(body['title']).trim(),
-      description: String(body['description']).trim(),
+      title: String(body['title'] ?? '').trim(),
+      description: String(body['description'] ?? '').trim(),
       categories: (body['categories'] as string[] | undefined) ?? [],
       keywords: (body['keywords']   as string[] | undefined) ?? [],
       collaborator_ids: (body['collaborator_ids'] as string[] | undefined) ?? [],
@@ -232,13 +250,14 @@ export async function handleCreateArtwork(
       allow_likes: body['allow_likes'] ?? true,
       show_engagement_stats: body['show_engagement_stats'] ?? true,
       has_variants: body['has_variants'] ?? false,
-      status: String(body['status']),
+      status: String(body['status'] ?? 'DRAFT'),
       
       ...(body['price'] !== undefined ? { price: Number(body['price']) } : {}),
       ...(body['currency'] !== undefined ? { currency: String(body['currency']) } : {}),
       ...(body['max_purchase_quantity'] !== undefined ? { max_purchase_quantity: Number(body['max_purchase_quantity']) } : {}),
       ...(body['physical_details'] !== undefined ? { physical_details: body['physical_details'] } : {}),
       ...(body['variants'] !== undefined ? { variants: body['variants'] } : {}),
+      ...(body['license_type'] !== undefined ? { license_type: body['license_type'] } : {}),
     }
 
     const artwork = await artworkService.createArtwork(input, req.auth.sub, req.auth.role as UserRole)
@@ -258,11 +277,15 @@ export async function handleGetArtwork(
     const { id } = req.params as { id: string }
     const artwork = await artworkService.getArtworkById(id, req.auth?.sub)
 
-    const { ctx } = { ctx: extractRequestContext(req) }
-    const identity = req.auth?.sub ?? ctx.ipAddress ?? 'anonymous'
-    void artworkService.trackView(id, identity).catch((err) => {
-      console.error(`[Analytics Error] Failed to track view for artwork ${id}:`, err)
-    })
+    // Only published artworks are viewed by an audience; a creator reopening
+    // their own draft is not a view.
+    if (artwork.status === 'PUBLISHED') {
+      const { ctx } = { ctx: extractRequestContext(req) }
+      const identity = req.auth?.sub ?? ctx.ipAddress ?? 'anonymous'
+      void artworkService.trackView(id, identity).catch((err) => {
+        console.error(`[Analytics Error] Failed to track view for artwork ${id}:`, err)
+      })
+    }
 
     res.json({ success: true, data: artwork })
   } catch (err) {
@@ -567,6 +590,7 @@ export async function handleUpdateArtwork(
     if (body['physical_details'] !== undefined) input.physical_details = body['physical_details']
     if (body['has_variants'] !== undefined) input.has_variants = body['has_variants']
     if (body['variants'] !== undefined) input.variants = body['variants']
+    if (body['license_type'] !== undefined) input.license_type = body['license_type']
 
     const artwork = await artworkService.updateArtwork(
       id, input, req.auth.sub, req.auth.role as UserRole,

@@ -1,4 +1,7 @@
 import { URL } from 'url'
+import { config } from '@/config'
+import { CloudinaryService } from '@/modules/upload/services/cloudinary.service'
+import { UPLOAD_ROOT_FOLDER } from '@/modules/upload/upload.constants'
 import { artworkRepository } from '../repositories/artwork.repository'
 import { followRepository } from '@/modules/follow/repositories/follow.repository'
 import { redisGetJson, redisSetJson, redisDel, getRedis, RedisKeys, RedisTTL } from '@/modules/redis/redis.client'
@@ -144,12 +147,47 @@ function validateConditionalFields(input: CreateArtworkInput): void {
 
 // ── Service Handlers ──────────────────────────────────────────────────────────
 
+// Files a draft no longer references belong to nobody, so they are removed from
+// Cloudinary when the draft is saved without them. Best effort: a failure here
+// must not fail the save, and only files under the creator's own upload folder
+// are ever touched.
+async function purgeRemovedAssets(
+  creatorId: string,
+  previous: ArtworkAsset[],
+  next: ArtworkAsset[],
+): Promise<void> {
+  const kept = new Set(next.map((asset) => asset.original_url))
+  const removed = previous.filter((asset) => !kept.has(asset.original_url))
+
+  await Promise.allSettled(removed.map(async (asset) => {
+    const parsed = CloudinaryService.parseDeliveryUrl(asset.original_url)
+    if (!parsed || parsed.cloudName !== config.cloudinary.cloudName) return
+
+    const publicId = asset.public_id ?? parsed.publicId
+    const ownFolder = `${UPLOAD_ROOT_FOLDER}/${creatorId}/`
+    if (!publicId.startsWith(ownFolder) || publicId.includes('..')) return
+
+    await CloudinaryService.destroyAsset(publicId, parsed.resourceType)
+  }))
+}
+
+// "Untitled" drafts still need a slug; the title is the only thing it is built from.
+function slugSource(title: string): string {
+  return title.trim() || 'untitled'
+}
+
+// Create-or-overwrite keyed by the client-supplied id: the wizard generates the
+// artwork id up front, so saving a draft twice (or saving then publishing) acts
+// on one row instead of creating a new one each time.
 export async function createArtwork(
   input: CreateArtworkInput,
   creatorId: string,
   requesterRole: UserRole,
 ): Promise<Artwork> {
-  validateConditionalFields(input)
+  const publishing = input.status === 'PUBLISHED'
+
+  // Drafts may be empty; completeness is enforced when the artwork goes live.
+  if (publishing) validateConditionalFields(input)
 
   if (input.listing_type === 'MARKETPLACE') {
     assertCanPublishMarketplace(requesterRole)
@@ -164,13 +202,37 @@ export async function createArtwork(
     }
   }
 
-  const slug = await artworkRepository.generateSlug(input.title, creatorId)
+  const existing = input.id ? await artworkRepository.findForUpsert(input.id) : undefined
 
-  if (input.status !== 'PUBLISHED') {
-    return artworkRepository.create(input, creatorId, slug)
+  let draft: Artwork
+  if (existing) {
+    if (existing.creator_id !== creatorId) {
+      throw new AppError('This artwork id is already in use', 409, 'ARTWORK_ID_TAKEN')
+    }
+    if (existing.deleted_at) {
+      throw new AppError('This draft has been deleted', 409, 'ARTWORK_DELETED')
+    }
+    if (existing.status !== 'DRAFT') {
+      throw new AppError('Only drafts can be saved over', 409, 'ARTWORK_NOT_DRAFT')
+    }
+
+    // Slugs are only regenerated when the title changes: the generator treats
+    // the row's own current slug as taken, so regenerating on every save would
+    // keep appending -1, -2, ...
+    const slug = input.title.trim() === existing.title.trim()
+      ? existing.slug
+      : await artworkRepository.generateSlug(slugSource(input.title), creatorId)
+
+    draft = await artworkRepository.replaceDraft(existing.id, input, slug, existing.assets)
+    await purgeRemovedAssets(creatorId, existing.assets, draft.assets)
+    invalidateArtworkCache(existing.id, existing.slug)
+  } else {
+    const slug = await artworkRepository.generateSlug(slugSource(input.title), creatorId)
+    draft = await artworkRepository.create({ ...input, status: 'DRAFT' }, creatorId, slug)
+    invalidateArtworkCache(draft.id)
   }
 
-  const draft = await artworkRepository.create({ ...input, status: 'DRAFT' }, creatorId, slug)
+  if (!publishing) return draft
   return publishArtwork(draft.id, creatorId, requesterRole)
 }
 
@@ -531,6 +593,22 @@ export async function updateArtwork(
   return updated
 }
 
+// What the upload wizard marks as required: a title, a description, at least
+// one category, at least one keyword and at least one piece of media.
+function assertPublishable(artwork: Artwork): void {
+  const missing: Record<string, string> = {}
+
+  if (!artwork.title.trim()) missing['title'] = 'Add a title before publishing'
+  if (!artwork.description.trim()) missing['description'] = 'Add a description before publishing'
+  if (!artwork.categories.length) missing['categories'] = 'Select at least one category before publishing'
+  if (!artwork.keywords.length) missing['keywords'] = 'Add at least one keyword before publishing'
+  if (!artwork.assets.length) missing['assets'] = 'Add at least one media item before publishing'
+
+  if (Object.keys(missing).length > 0) {
+    throw new ValidationError('Complete the required details before publishing', missing)
+  }
+}
+
 export async function publishArtwork(
   id: string,
   requesterId: string,
@@ -544,11 +622,7 @@ export async function publishArtwork(
   if (artwork.status === 'ARCHIVED') {
     throw new AppError('Archived artworks cannot be published', 409, 'ARTWORK_ARCHIVED')
   }
-  if (!artwork.assets.length) {
-    throw new ValidationError('Validation failed', {
-      assets: 'An artwork must have at least one asset before publishing',
-    })
-  }
+  assertPublishable(artwork)
 
   if (artwork.listing_type === 'MARKETPLACE') {
     assertCanPublishMarketplace(requesterRole)

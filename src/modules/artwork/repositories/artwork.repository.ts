@@ -183,6 +183,7 @@ export const artworkRepository = {
     }))
 
     const payload: Record<string, any> = {
+      ...(input.id ? { ['id']: input.id } : {}),
       ['listing_type']: input.listing_type,
       ['artwork_format']: input.artwork_format,
       ['title']: input.title,
@@ -219,6 +220,90 @@ export const artworkRepository = {
       .single()
 
     assertNoError(result, 'artwork.create')
+    return toArtwork(result.data)
+  },
+
+  // ── Draft upsert ───────────────────────────────────────────────────────────
+
+  // Looks the row up by primary key including soft-deleted rows, because a
+  // client-chosen id must never collide with one that already exists.
+  async findForUpsert(id: string): Promise<{
+    id: string
+    creator_id: string
+    status: string
+    title: string
+    slug: string
+    assets: ArtworkAsset[]
+    deleted_at: string | null
+  } | undefined> {
+    const result = await (supabase() as any)
+      .from('artworks')
+      .select('id, creator_id, status, title, slug, assets, deleted_at')
+      .eq('id', id)
+      .maybeSingle()
+
+    assertNoError(result, 'artwork.findForUpsert')
+    if (!result.data) return undefined
+    return { ...result.data, assets: parseJsonField<ArtworkAsset[]>(result.data.assets, []) }
+  },
+
+  // Overwrites every wizard-owned column of a draft with what the client sent,
+  // including the ones update() treats as immutable (listing_type,
+  // artwork_format) and collections update() merges instead of replacing
+  // (assets, variants). Omitted optional fields reset to null.
+  async replaceDraft(
+    id: string,
+    input: CreateArtworkInput,
+    slug: string,
+    previousAssets: ArtworkAsset[],
+  ): Promise<Artwork> {
+    const previousIds = new Map(previousAssets.map((a) => [a.original_url, a.id]))
+    const assets = input.assets.map((a, i) => ({
+      ...a,
+      id: previousIds.get(a.original_url) ?? uuidv4(),
+      ordering_index: a.ordering_index ?? i,
+    }))
+
+    const variants = (input.variants ?? []).map((v) => ({
+      ...v,
+      id: uuidv4(),
+      options: v.options.map((o) => ({ ...o, id: uuidv4() })),
+    }))
+
+    const result = await (supabase() as any)
+      .from('artworks')
+      .update({
+        ['listing_type']: input.listing_type,
+        ['artwork_format']: input.artwork_format,
+        ['title']: input.title,
+        ['description']: input.description,
+        ['slug']: slug,
+        ['categories']: input.categories,
+        ['keywords']: input.keywords,
+        ['collaborator_ids']: input.collaborator_ids,
+        ['tools_used']: input.tools_used,
+        ['assets']: assets,
+        ['visibility']: input.visibility,
+        ['allow_moodboard_save']: input.allow_moodboard_save,
+        ['allow_comments']: input.allow_comments,
+        ['allow_likes']: input.allow_likes,
+        ['show_engagement_stats']: input.show_engagement_stats,
+        ['price']: input.price ?? null,
+        ['currency']: input.currency ?? 'USD',
+        ['max_purchase_quantity']: input.max_purchase_quantity ?? null,
+        ['physical_details']: input.physical_details ?? null,
+        ['has_variants']: input.has_variants,
+        ['variants']: variants,
+        ['license_type']: input.license_type ?? null,
+        ['updated_at']: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('status', 'DRAFT')
+      .is('deleted_at', null)
+      .select('*')
+      .single()
+
+    assertNoError(result, 'artwork.replaceDraft')
     return toArtwork(result.data)
   },
 

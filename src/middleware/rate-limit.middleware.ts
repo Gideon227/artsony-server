@@ -112,6 +112,22 @@ export const apiRateLimit = rateLimit({
   store: new RedisStore('rl:api:', config.security.rateLimits.api.windowMs) as never,
 })
 
+// ─── Upload signing: per user, 120 signatures per 15 minutes ──────────────────
+// A batch upload requests one signature per file; the file bytes go straight
+// to Cloudinary and never count against this server.
+
+const UPLOAD_SIGN_WINDOW_MS = 15 * 60 * 1000
+
+export const uploadSignRateLimit = rateLimit({
+  windowMs: UPLOAD_SIGN_WINDOW_MS,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.auth?.sub ?? req.ip ?? 'unknown',
+  handler,
+  store: new RedisStore('rl:upload-sign:', UPLOAD_SIGN_WINDOW_MS) as never,
+})
+
 // ─── Slow-down: progressively delay after 5 requests ─────────────────────────
 
 export const loginSlowDown = slowDown({

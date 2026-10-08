@@ -11,7 +11,7 @@ function optional_env(key: string, fallback: string): string {
 }
 
 // ── Environment Constants (Fixes noPropertyAccessFromIndexSignature) ─────────
-const currentEnv = (process.env['NODE_ENV'] ?? 'development') as 'development' | 'production' | 'test'
+const currentEnv = (process.env['NODE_ENV'] || 'development') as 'development' | 'production' | 'test'
 const isProduction = currentEnv === 'production'
 
 export const config = {

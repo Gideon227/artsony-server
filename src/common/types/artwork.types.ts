@@ -4,7 +4,7 @@ import { User, UserRole } from "."
 
 export type ListingType = 'MARKETPLACE' | 'PORTFOLIO'
 export type ArtworkFormat = 'DIGITAL' | 'PHYSICAL'
-export type ArtworkMediaType = 'IMAGE' | 'VIDEO' | 'THREE_D' | 'EXTERNAL_LINK'
+export type ArtworkMediaType = 'IMAGE' | 'VIDEO' | 'THREE_D' | 'EXTERNAL_LINK' | 'PDF'
 export type ArtworkVisibility = 'PUBLIC' | 'PRIVATE' | 'UNLISTED'
 // PAUSED: set automatically when an approved seller is suspended or later
 // rejected (after having published MARKETPLACE artwork) — hides the artwork
@@ -23,6 +23,7 @@ export type LicenseType = 'attribution' | 'attribution-sharealike' | 'attributio
 
 export type ArtworkAsset = {
   id: string
+  public_id?: string | null
   original_url: string
   optimized_url: string | null
   thumbnail_url: string | null
@@ -113,6 +114,7 @@ export type Artwork = {
 // ── Input DTOs ────────────────────────────────────────────────────────────────
 
 export type CreateArtworkInput = {
+  id?: string
   listing_type: ListingType
   artwork_format: ArtworkFormat
   title: string
@@ -210,6 +212,7 @@ export const ALLOWED_EXTERNAL_MIME_TYPES = new Set([
   'image/svg+xml',
   'video/mp4', 'video/webm',
   'model/gltf-binary', 'model/gltf+json',
+  'text/html',
 ])
 
 // Domains that are explicitly blocked regardless of protocol / MIME.

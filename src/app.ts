@@ -5,7 +5,6 @@ import cookieParser from 'cookie-parser'
 import morgan from 'morgan'
 import hpp from 'hpp'
 import mongoSanitize from 'express-mongo-sanitize'
-import path from 'path'
 
 // Modules
 import { authRouter } from './modules/auth/auth.router'
@@ -90,12 +89,6 @@ export function createApp() {
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', ts: new Date().toISOString() })
   })
-
-  app.use('/uploads', (_req, res, next) => {
-    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
-    next()
-  })
-  app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')))
 
   // ── Routes ─────────────────────────────────────────────────────────────────
   app.use('/api', apiRateLimit) // Applies rate limiting to all /api routes defined below
