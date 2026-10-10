@@ -20,6 +20,7 @@ import type {
 } from '@/common/types/wallet.types'
 import type { WalletLedgerEntry, PaginatedResult } from '@/common/types/commerce.types'
 import { config } from '@/config'
+import type { NotificationEvent } from '@/common/constants/notification-events'
 
 // ── Destination validation ──────────────────────────────────────────────────────
 // No payout provider is integrated — this only validates shape so the admin
@@ -191,11 +192,16 @@ export const walletService = {
       FAILED:     `Your withdrawal of ${updated.amount} ${updated.currency} failed and the funds have been returned to your available balance.`,
     }
     const message = statusMessages[input.newStatus]
+    const event: NotificationEvent | undefined =
+      input.newStatus === 'COMPLETED' ? 'withdrawal_completed'
+      : input.newStatus === 'FAILED'  ? 'transaction_failed'
+      : undefined
     if (message) {
       void notificationService.create({
         recipientId: updated.user_id,
         actorId:     input.adminId,
         type:        'sale',
+        ...(event && { event }),
         entityId:    updated.id,
         entityType:  'withdrawal_request',
         data:        { body: message },

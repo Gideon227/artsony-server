@@ -17,6 +17,7 @@ export const followService = {
                 recipientId: followingId,
                 actorId: followerId,
                 type: 'follow',
+                event: 'new_follower',
                 entityId: followerId,
                 entityType: 'user',
                 data: {},

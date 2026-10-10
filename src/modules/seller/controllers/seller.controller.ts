@@ -67,7 +67,8 @@ export const updateDispatchAddressValidation = [
   body('phone_number').optional().isString().trim().isLength({ min: 5, max: 30 }),
   body('address').optional().isString().trim().isLength({ min: 1, max: 300 }),
   body('state').optional().isString().trim().isLength({ min: 1, max: 120 }),
-  body('country').optional().isString().trim().isLength({ min: 2, max: 2 }),
+  body('city').optional().isString().trim().isLength({ min: 1, max: 100 }),
+  body('country').optional().isString().trim().isISO31661Alpha2(),
   body('postal_code').optional().isString().trim().isLength({ max: 30 }),
 ]
 
@@ -175,6 +176,7 @@ export async function handleUpdateDispatchAddress(
       ...(payload['phone_number'] !== undefined ? { phone_number: String(payload['phone_number']).trim() } : {}),
       ...(payload['address'] !== undefined ? { address: String(payload['address']).trim() } : {}),
       ...(payload['state'] !== undefined ? { state: String(payload['state']).trim() } : {}),
+      ...(payload['city'] !== undefined ? { city: String(payload['city']).trim() } : {}),
       ...(payload['country'] !== undefined ? { country: String(payload['country']).trim().toUpperCase() } : {}),
       ...(payload['postal_code'] !== undefined ? { postal_code: String(payload['postal_code']).trim() } : {}),
     }

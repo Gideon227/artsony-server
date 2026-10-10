@@ -61,14 +61,15 @@ export const reviewService = {
 
     void notificationService.create({
       recipientId: eligibility.seller_id,
-      actorId:     input.buyerId,
-      type:        'review',
-      entityId:    review.id,
+      actorId: input.buyerId,
+      type: 'review',
+      event: 'new_review',
+      entityId: review.id,
       entityType:  'order_review',
       data: {
-        body:          `You received a new ${review.rating}-star review on "${eligibility.artwork_title}".`,
-        artwork_id:    eligibility.artwork_id,
-        rating:        review.rating,
+        body: `You received a new ${review.rating}-star review on "${eligibility.artwork_title}".`,
+        artwork_id: eligibility.artwork_id,
+        rating: review.rating,
       },
     }).catch(() => {})
 

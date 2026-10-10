@@ -2,7 +2,7 @@
 // Domain types — the shape the application layer works with.
 // DB rows are mapped to these in repository layer (Date strings → Date objects, etc.)
 // These types are NEVER exposed directly to clients — sanitisation happens in controllers.
-
+import type { NotificationEvent } from '../constants/notification-event'
 import type { WebSocket } from 'ws'
 import { Moodboard } from "./moodboard.types"
 
@@ -297,13 +297,15 @@ export type NotificationType =
   | 'mention'
   | 'review'
 
+export type MutedNotificationKey = NotificationType | NotificationEvent
+
 export type NotificationPreferences = {
   id:             string
   user_id:        string
   push_enabled:   boolean
   email_enabled:  boolean
   ws_enabled:     boolean
-  types_muted:    NotificationType[]
+  types_muted:    MutedNotificationKey[]
   updated_at:     Date
 }
 

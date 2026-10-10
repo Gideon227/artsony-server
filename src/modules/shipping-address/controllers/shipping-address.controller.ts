@@ -30,10 +30,11 @@ const addressFields = [
     .trim()
     .withMessage('full_name is required'),
   body('phone')
+    .optional({ nullable: true })
     .isString()
-    .isLength({ min: 5, max: 30 })
     .trim()
-    .withMessage('phone is required'),
+    .isLength({ min: 5, max: 30 })
+    .withMessage('phone must be between 5 and 30 characters'),
   body('address_line_1')
     .isString()
     .isLength({ min: 1, max: 300 })
@@ -83,16 +84,16 @@ export const shippingAddressIdValidation = [
 
 function buildInput(body: Record<string, any>): CreateShippingAddressInput {
   return {
-    label:          body['label'] ?? null,
-    full_name:      String(body['full_name']),
-    phone:          String(body['phone']),
+    label: body['label'] ?? null,
+    full_name: String(body['full_name']),
+    phone: body['phone'] != null ? String(body['phone']) : null,
     address_line_1: String(body['address_line_1']),
     address_line_2: body['address_line_2'] ?? null,
-    city:           String(body['city']),
-    state:          String(body['state']),
-    postal_code:    String(body['postal_code']),
-    country_code:   String(body['country_code']).toUpperCase(),
-    is_default:     Boolean(body['is_default'] ?? false),
+    city: String(body['city']),
+    state: String(body['state']),
+    postal_code: String(body['postal_code']),
+    country_code: String(body['country_code']).toUpperCase(),
+    is_default: Boolean(body['is_default'] ?? false),
   }
 }
 
@@ -144,7 +145,7 @@ export async function handleUpdate(req: Request, res: Response, next: NextFuncti
     const input: Partial<Omit<CreateShippingAddressInput, 'is_default'>> = {
       ...(b['label']          !== undefined && { label: b['label'] }),
       ...(b['full_name']      !== undefined && { full_name: String(b['full_name']) }),
-      ...(b['phone']          !== undefined && { phone: String(b['phone']) }),
+      ...(b['phone']          !== undefined && { phone: b['phone'] === null ? null : String(b['phone']) }),
       ...(b['address_line_1'] !== undefined && { address_line_1: String(b['address_line_1']) }),
       ...(b['address_line_2'] !== undefined && { address_line_2: b['address_line_2'] }),
       ...(b['city']           !== undefined && { city: String(b['city']) }),

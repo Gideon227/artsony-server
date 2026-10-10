@@ -97,7 +97,7 @@ export async function updateMyRegistration(
 // address-only fields.
 export async function updateDispatchAddress(
   userId: string,
-  input: Partial<Pick<SellerRegistration, 'address' | 'state' | 'country' | 'postal_code' | 'phone_number'>>,
+  input: Partial<Pick<SellerRegistration, 'address' | 'state' | 'country' | 'city' | 'postal_code' | 'phone_number'>>,
 ): Promise<SellerRegistration> {
   const updated = await sellerRepository.updateDispatchAddressByUser(userId, input)
   if (updated) return updated

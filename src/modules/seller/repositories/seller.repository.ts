@@ -150,7 +150,7 @@ export const sellerRepository = {
   // only once the registration is actually APPROVED.
   async updateDispatchAddressByUser(
     userId: string,
-    input: Partial<Pick<SellerRegistration, 'address' | 'state' | 'country' | 'postal_code' | 'phone_number'>>,
+    input: Partial<Pick<SellerRegistration, 'address' | 'state' | 'country' | 'city' | 'postal_code' | 'phone_number'>>,
   ): Promise<SellerRegistration | undefined> {
     const payload: Record<string, any> = {
       ...input,

@@ -1,0 +1,28 @@
+export const NOTIFICATION_EVENTS = [
+  'new_order',
+  'order_activated',
+  'shipment_updates',
+  'order_delivered',
+  'order_canceled',
+  'earnings_received',
+  'funds_available',
+  'withdrawal_completed',
+  'refund_issued',
+  'transaction_failed',
+  'new_device_login',
+  'password_changed',
+  'suspicious_activity',
+  'new_message',
+  'new_comment',
+  'new_follower',
+  'artwork_liked',
+  'new_review',
+  'rating_updated',
+  'product_updates',
+  'policy_changes',
+  'maintenance_alerts',
+  'featured_opportunities',
+  'challenge_events',
+] as const
+
+export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number]

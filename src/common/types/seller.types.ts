@@ -14,6 +14,7 @@ export type SellerRegistration = {
   address: string
   state: string
   country: string
+  city: string | null
   postal_code: string | null
   status: SellerRegistrationStatus
   reviewed_by: string | null

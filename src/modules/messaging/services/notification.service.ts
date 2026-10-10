@@ -4,9 +4,11 @@ import { getRedis } from '@/modules/redis/redis.client'
 import { notificationPreferencesRepository } from '../repositories/notification-preferences.repository'
 import type {
   MessageWithSender,
+  MutedNotificationKey,
   NotificationType,
   WsNotificationPayload,
 } from '@/common/types'
+import type { NotificationEvent } from '@/common/constants/notification-event'
 
 // ─── NotificationService ──────────────────────────────────────────────────────
 // Owns all notification creation and delivery.
@@ -27,6 +29,8 @@ export const notificationService = {
 
     const type: NotificationType =
       input.message.is_broadcast_root ? 'broadcast' : 'message'
+    const event: NotificationEvent | undefined =
+      type === 'message' ? 'new_message' : undefined
 
     // Per-recipient mute check — a recipient who has muted 'message' (or
     // 'broadcast') shouldn't get a notification row created for them at
@@ -42,7 +46,7 @@ export const notificationService = {
     )
 
     const eligibleRecipientIds = input.recipientIds.filter(
-      (id) => !flagsByRecipient.get(id)?.types_muted.includes(type),
+      (id) => !isMuted(flagsByRecipient.get(id)?.types_muted, type, event),
     )
     if (eligibleRecipientIds.length === 0) return
 
@@ -117,12 +121,13 @@ export const notificationService = {
     recipientId:  string
     actorId:      string | null
     type:         NotificationType
+    event?:       NotificationEvent
     entityId:     string | null
     entityType:   string | null
     data?:        Record<string, unknown>
   }): Promise<void> {
     const flags = await notificationPreferencesRepository.getEnforcementFlags(input.recipientId)
-    if (flags.types_muted.includes(input.type)) return
+    if (isMuted(flags.types_muted, input.type, input.event)) return
 
     const { error, data } = await (supabase() as any)
       .from('notifications')
@@ -300,7 +305,7 @@ export const notificationService = {
       push_enabled: boolean
       email_enabled: boolean
       ws_enabled: boolean
-      types_muted: NotificationType[]
+      types_muted: MutedNotificationKey[]
     }>,
   ) {
     return notificationPreferencesRepository.update(userId, changes)
@@ -308,6 +313,15 @@ export const notificationService = {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function isMuted(
+  muted: MutedNotificationKey[] | undefined,
+  type: NotificationType,
+  event?: NotificationEvent,
+): boolean {
+  if (!muted || muted.length === 0) return false
+  return muted.includes(type) || (event !== undefined && muted.includes(event))
+}
 
 function buildPreview(body: string, maxLen = 80): string {
   return body.length > maxLen ? `${body.slice(0, maxLen).trimEnd()}…` : body

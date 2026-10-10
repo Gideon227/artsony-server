@@ -203,7 +203,7 @@ export type ShippingAddress = {
   user_id: string
   label: string | null
   full_name: string
-  phone: string
+  phone: string | null
   address_line_1: string
   address_line_2: string | null
   city: string

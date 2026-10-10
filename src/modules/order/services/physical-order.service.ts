@@ -1,3 +1,4 @@
+import type { NotificationEvent } from '@/common/constants/notification-events'
 import { getRedis } from '@/modules/redis/redis.client'
 import { physicalOrderRepository } from '../repositories/physical-order.repository'
 import { invoiceService, receiptService } from './invoice.service'
@@ -52,6 +53,7 @@ async function releaseLock(key: string): Promise<void> {
 async function notify(input: {
   recipientIds: string[]
   type:         string
+  event?:       NotificationEvent
   body:         string
   metadata:     Record<string, unknown>
   orderId?:     string
@@ -66,6 +68,7 @@ async function notify(input: {
           recipientId:  id,
           actorId:      null,
           type:         input.type as any,
+          ...(input.event && { event: input.event }),
           entityId:     input.orderId ?? null,
           entityType:   'order',
           data:         { body: input.body, ...input.metadata },
@@ -172,6 +175,7 @@ export const physicalOrderService = {
     await notify({
       recipientIds: [input.sellerId],
       type:         'order_update',
+      event:        'new_order',
       body:         `You have a new order ${orderNumber}. Please confirm within 14 days.`,
       metadata:     meta,
       orderId:      input.orderId,
@@ -254,6 +258,7 @@ export const physicalOrderService = {
       await notify({
         recipientIds: [buyerId],
         type:         'order_update',
+        event:        'order_activated',
         body:         `Order ${orderNumber ?? physical.order_id} confirmed by the artist and is awaiting pickup.`,
         metadata:     { order_id: physical.order_id, order_number: orderNumber },
         orderId:      physical.order_id,
@@ -317,6 +322,7 @@ export const physicalOrderService = {
     await notify({
       recipientIds,
       type:     'order_update',
+      event:    'order_activated',
       body:     `Order ${orderNumber ?? physical.order_id} pickup scheduled with ${input.courier_name}.`,
       metadata: { order_id: physical.order_id, order_number: orderNumber },
       orderId:  physical.order_id,
@@ -379,6 +385,7 @@ export const physicalOrderService = {
       await notify({
         recipientIds: [buyerId],
         type:         'order_update',
+        event:        'shipment_updates',
         body:         `Order ${orderNumber ?? physical.order_id} is on its way.${input.tracking_id ? ` Tracking: ${input.tracking_id}` : ''}`,
         metadata:     { order_id: physical.order_id, order_number: orderNumber },
         orderId:      physical.order_id,
@@ -420,6 +427,7 @@ export const physicalOrderService = {
       await notify({
         recipientIds: [buyerId],
         type:         'order_update',
+        event:        'shipment_updates',
         body:         `Order ${orderNumber ?? physical.order_id} is out for delivery today!`,
         metadata:     { order_id: physical.order_id, order_number: orderNumber },
         orderId:      physical.order_id,
@@ -477,6 +485,7 @@ export const physicalOrderService = {
     await notify({
       recipientIds,
       type:     'order_update',
+      event:    'order_delivered',
       body:     `Order ${orderNumber ?? physical.order_id} has been delivered successfully.`,
       metadata: { order_id: physical.order_id, order_number: orderNumber },
       orderId:  physical.order_id,
@@ -520,7 +529,7 @@ export const physicalOrderService = {
     const meta        = { order_id: physical.order_id, order_number: orderNumber }
     const buyerSeller = [buyerId, sellerId].filter((id): id is string => id !== null)
 
-    await notify({ recipientIds: buyerSeller, type: 'order_update', body: `Order ${orderNumber ?? physical.order_id} could not be delivered. Our team is looking into it.`, metadata: meta, orderId: physical.order_id })
+    await notify({ recipientIds: buyerSeller, type: 'order_update', event: 'shipment_updates', body: `Order ${orderNumber ?? physical.order_id} could not be delivered. Our team is looking into it.`, metadata: meta, orderId: physical.order_id })
     await notify({ recipientIds: adminIds,    type: 'order_update', body: `Order ${orderNumber ?? physical.order_id} has a delivery failure. Please review.`, metadata: meta, orderId: physical.order_id })
 
     return updated
@@ -561,6 +570,7 @@ export const physicalOrderService = {
     await notify({
       recipientIds,
       type:     'order_update',
+      event:    'shipment_updates',
       body:     `Order ${orderNumber ?? physical.order_id} has experienced a delivery delay. ${input.notes}`,
       metadata: { order_id: physical.order_id, order_number: orderNumber },
       orderId:  physical.order_id,
@@ -692,6 +702,7 @@ export const physicalOrderService = {
       await notify({
         recipientIds,
         type:     'order_update',
+        event:    'order_canceled',
         body:     `Order ${orderNumber ?? physical.order_id} has been cancelled. ${input.reason}`,
         metadata: { order_id: physical.order_id, order_number: orderNumber, cancelled_by: actorRole },
         orderId:  physical.order_id,
@@ -836,6 +847,7 @@ export const physicalOrderService = {
       await notify({
         recipientIds: [buyerId],
         type:         'order_update',
+        event:        'refund_issued',
         body:         `Your refund of ${refundableAmt.toFixed(2)} USDT for order ${orderNumber ?? physical.order_id} has been processed.`,
         metadata:     { order_id: physical.order_id, order_number: orderNumber, refund_amount: refundableAmt },
         orderId:      physical.order_id,

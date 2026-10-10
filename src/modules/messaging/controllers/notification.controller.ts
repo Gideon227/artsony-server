@@ -2,6 +2,8 @@ import type { Request, Response, NextFunction } from 'express'
 import { body, query, param, validationResult } from 'express-validator'
 import { notificationService } from '../services/notification.service'
 import { ValidationError } from '@/common/errors'
+import { NOTIFICATION_EVENTS } from '@/common/constants/notification-event'
+import type { MutedNotificationKey } from '@/common/types'
 
 // ── Validation chains ────────────────────────────────────────────────────────
 
@@ -44,12 +46,14 @@ const NOTIFICATION_TYPES = [
   'system', 'message', 'broadcast', 'mention', 'review',
 ]
 
+const MUTABLE_NOTIFICATION_KEYS: readonly string[] = [...NOTIFICATION_TYPES, ...NOTIFICATION_EVENTS]
+
 export const updatePreferencesValidation = [
   body('push_enabled').optional().isBoolean(),
   body('email_enabled').optional().isBoolean(),
   body('ws_enabled').optional().isBoolean(),
-  body('types_muted').optional().isArray(),
-  body('types_muted.*').optional().isIn(NOTIFICATION_TYPES),
+  body('types_muted').optional().isArray({ max: MUTABLE_NOTIFICATION_KEYS.length }),
+  body('types_muted.*').optional().isIn(MUTABLE_NOTIFICATION_KEYS),
 ]
 
 // GET /api/notifications/preferences
@@ -76,7 +80,18 @@ export async function handleUpdatePreferences(
   try {
     assertValid(req)
     const userId = req.auth!.sub
-    const preferences = await notificationService.updatePreferences(userId, req.body)
+    const { push_enabled, email_enabled, ws_enabled, types_muted } = req.body as {
+      push_enabled?:  boolean
+      email_enabled?: boolean
+      ws_enabled?:    boolean
+      types_muted?:   MutedNotificationKey[]
+    }
+    const preferences = await notificationService.updatePreferences(userId, {
+      ...(push_enabled  !== undefined && { push_enabled }),
+      ...(email_enabled !== undefined && { email_enabled }),
+      ...(ws_enabled    !== undefined && { ws_enabled }),
+      ...(types_muted   !== undefined && { types_muted: [...new Set(types_muted)] }),
+    })
     res.json({ success: true, data: preferences })
   } catch (err) {
     next(err)

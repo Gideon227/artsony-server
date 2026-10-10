@@ -1,5 +1,5 @@
 import { supabase } from '@/config/database'
-import type { NotificationPreferences, NotificationType } from '@/common/types'
+import type { NotificationPreferences, MutedNotificationKey } from '@/common/types'
 
 const DEFAULTS: Omit<NotificationPreferences, 'id' | 'user_id' | 'updated_at'> = {
   push_enabled:  true,
@@ -61,7 +61,7 @@ export const notificationPreferencesRepository = {
   // mute list and channel flags are needed.
   async getEnforcementFlags(
     userId: string,
-  ): Promise<{ types_muted: NotificationType[]; ws_enabled: boolean }> {
+  ): Promise<{ types_muted: MutedNotificationKey[]; ws_enabled: boolean }> {
     const result = await (supabase() as any)
       .from('notification_preferences')
       .select('types_muted, ws_enabled')

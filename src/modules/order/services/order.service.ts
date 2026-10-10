@@ -212,6 +212,11 @@ export const orderService = {
           shipping_address_id: 'Shipping address not found',
         })
       }
+      if (!saved.phone) {
+        throw new ValidationError('Validation failed', {
+          shipping_address_id: 'The selected address has no phone number. Add one to the address or provide the address inline',
+        })
+      }
       resolvedShippingAddress = {
         full_name:      saved.full_name,
         phone:          saved.phone,
