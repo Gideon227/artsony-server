@@ -20,7 +20,7 @@ import type {
 } from '@/common/types/wallet.types'
 import type { WalletLedgerEntry, PaginatedResult } from '@/common/types/commerce.types'
 import { config } from '@/config'
-import type { NotificationEvent } from '@/common/constants/notification-events'
+import type { NotificationEvent } from '@/common/constants/notification-event'
 
 // ── Destination validation ──────────────────────────────────────────────────────
 // No payout provider is integrated — this only validates shape so the admin

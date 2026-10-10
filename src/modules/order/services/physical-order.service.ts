@@ -1,4 +1,4 @@
-import type { NotificationEvent } from '@/common/constants/notification-events'
+import type { NotificationEvent } from '@/common/constants/notification-event'
 import { getRedis } from '@/modules/redis/redis.client'
 import { physicalOrderRepository } from '../repositories/physical-order.repository'
 import { invoiceService, receiptService } from './invoice.service'
