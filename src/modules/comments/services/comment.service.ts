@@ -49,7 +49,6 @@ export const commentService = {
         recipientId,
         actorId:    userId,
         type:       input.parent_id ? 'reply' : 'comment',
-        event:      'new_comment',
         entityId:   comment.id,
         entityType: 'artwork_comment',
         data: {
