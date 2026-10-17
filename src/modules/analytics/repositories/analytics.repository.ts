@@ -2,6 +2,7 @@ import { supabase } from '@/config/database'
 import type { WalletLedgerCategory } from '@/common/types/commerce.types'
 import type {
   DailyEarningsPoint,
+  DailySeriesPoint,
   SalesAnalyticsFilters,
   SalesAnalyticsItem,
   SalesAnalyticsStatus,
@@ -74,6 +75,29 @@ export const analyticsRepository = {
       day:         row['day'],
       amount:      Number(row['amount']),
       sales_count: Number(row['sales_count']),
+    }))
+  },
+
+  // ── GetDailySeries ───────────────────────────────────────────────────────────
+  // Zero-filled per-day earnings/sales/views/likes for [from, to] (UTC dates).
+
+  async getDailySeries(sellerId: string, from: string, to: string): Promise<DailySeriesPoint[]> {
+    const result = await (supabase() as any).rpc('get_artist_daily_series', {
+      p_seller_id: sellerId,
+      p_from:      from,
+      p_to:        to,
+    })
+
+    if (result.error) {
+      throw new Error(`[Supabase:analytics.getDailySeries] ${result.error.message}`)
+    }
+
+    return ((result.data ?? []) as any[]).map((row) => ({
+      day:         row['day'],
+      amount:      Number(row['amount']),
+      sales_count: Number(row['sales_count']),
+      views:       Number(row['views']),
+      likes:       Number(row['likes']),
     }))
   },
 

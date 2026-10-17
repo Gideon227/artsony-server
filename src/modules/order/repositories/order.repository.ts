@@ -19,7 +19,7 @@ import type {
 
 // ── Row → Domain mappers ──────────────────────────────────────────────────────
 
-function toOrderItem(row: any): OrderItem {
+export function toOrderItem(row: any): OrderItem {
   return {
     id:                    row['id'],
     order_id:              row['order_id'],

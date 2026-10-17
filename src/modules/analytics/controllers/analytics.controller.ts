@@ -7,7 +7,8 @@ import { compact } from '@/common/utils/object.utils'
 import type { AnalyticsPeriod, SalesAnalyticsStatus, SalesAnalyticsSort, TopArtworkMetric } from '@/common/types/analytics.types'
 import type { WalletLedgerCategory } from '@/common/types/commerce.types'
 
-const PERIODS = ['day', 'week', '2weeks', 'month', '6months', 'year']
+const PERIODS = ['day', 'week', '2weeks', 'month', '6months', 'year', 'all']
+const ISO_DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
 
 function assertValid(req: Request): void {
   const errors = validationResult(req)
@@ -43,6 +44,12 @@ export const dailyEarningsValidation = [
   query('artist_id').optional().isUUID(),
 ]
 
+export const dailySeriesValidation = [
+  query('from').matches(ISO_DATE_ONLY).withMessage('from must be a YYYY-MM-DD date'),
+  query('to').matches(ISO_DATE_ONLY).withMessage('to must be a YYYY-MM-DD date'),
+  query('artist_id').optional().isUUID(),
+]
+
 export const salesAnalyticsValidation = [
   query('status').optional().isIn(['pending', 'hold', 'completed', 'cancelled']),
   query('category').optional().isIn(['SALE', 'WITHDRAWAL', 'REFUND', 'ADJUSTMENT']),
@@ -59,7 +66,7 @@ export const salesAnalyticsValidation = [
 
 export const topArtworksValidation = [
   query('period').optional().isIn(PERIODS),
-  query('metric').optional().isIn(['earnings', 'sales', 'engagement']),
+  query('metric').optional().isIn(['earnings', 'sales', 'views', 'engagement']),
   query('limit').optional().isInt({ min: 1, max: 50 }).toInt(),
   query('artist_id').optional().isUUID(),
 ]
@@ -73,6 +80,8 @@ export const commentAnalyticsValidation = [
   query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
   query('sort').optional().isIn(['newest', 'oldest', 'highest', 'lowest']),
   query('search').optional().isString().trim(),
+  query('date_from').optional().isISO8601(),
+  query('date_to').optional().isISO8601(),
   query('artist_id').optional().isUUID(),
 ]
 
@@ -97,6 +106,19 @@ export async function handleGetDailyEarnings(req: Request, res: Response, next: 
     const year = Number(req.query['year'])
     const series = await analyticsService.getDailyEarnings(sellerId, year)
     res.json({ success: true, data: series, year })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export async function handleGetDailySeries(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    assertValid(req)
+    const sellerId = resolveSellerId(req)
+    const from = String(req.query['from'])
+    const to = String(req.query['to'])
+    const series = await analyticsService.getDailySeries(sellerId, from, to)
+    res.json({ success: true, data: series, from, to })
   } catch (err) {
     next(err)
   }
@@ -162,8 +184,10 @@ export async function handleGetCommentAnalytics(req: Request, res: Response, nex
     const result = await reviewService.listForSeller(sellerId, compact({
       page:   q['page'] ? Number(q['page']) : undefined,
       limit:  q['limit'] ? Number(q['limit']) : undefined,
-      sort:   q['sort'] as any,
-      search: q['search'],
+      sort:      q['sort'] as any,
+      search:    q['search'],
+      date_from: q['date_from'],
+      date_to:   q['date_to'],
     }))
 
     res.json({ success: true, ...result })

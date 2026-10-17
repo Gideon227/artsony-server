@@ -16,9 +16,11 @@ export type WithdrawalStatus =
 // payout integration can be added later without a schema change.
 export type WithdrawalDestinationType = 'WALLET_ADDRESS' | 'BANK_ACCOUNT'
 
+export const WITHDRAWAL_NETWORKS = ['TRON', 'ETHEREUM', 'BSC'] as const
+
 export type WithdrawalDestinationDetails = {
   // WALLET_ADDRESS
-  network?:        'TRON' | 'ETHEREUM' | 'BSC'
+  network?:        (typeof WITHDRAWAL_NETWORKS)[number]
   wallet_address?: string
   // BANK_ACCOUNT
   bank_name?:      string
@@ -65,6 +67,18 @@ export type WalletBalanceSummary = {
 }
 
 // ── Ledger listing ─────────────────────────────────────────────────────────────
+
+// A WITHDRAWAL ledger row is only the balance reservation — its real state
+// (pending / processing / rejected / completed) and destination live on the
+// linked withdrawal request, so the listing carries them alongside the row.
+export type WalletLedgerWithdrawal = {
+  status: WithdrawalStatus
+  destination_details: WithdrawalDestinationDetails
+}
+
+export type WalletLedgerListItem = WalletLedgerEntry & {
+  withdrawal: WalletLedgerWithdrawal | null
+}
 
 export type WalletLedgerFilters = {
   category?: WalletLedgerCategory

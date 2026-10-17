@@ -6,7 +6,9 @@ import type {
   AnalyticsPeriod,
   AnalyticsOverview,
   DailyEarningsPoint,
+  DailySeriesPoint,
   MetricTrend,
+  ScoreTrend,
   SalesAnalyticsFilters,
   SalesAnalyticsItem,
   TopArtwork,
@@ -19,7 +21,11 @@ import { ValidationError } from '@/common/errors'
 // ── Trend math ─────────────────────────────────────────────────────────────────
 // Shared by every "up/down X% vs previous period" figure in this module.
 
-function computeTrend(current: number, previous: number): MetricTrend {
+export function computeTrend(current: number, previous: number, comparable = true): MetricTrend {
+  if (!comparable) {
+    return { current, previous: 0, change_percent: 0, direction: 'flat' }
+  }
+
   let changePercent: number
   if (previous === 0) {
     changePercent = current === 0 ? 0 : 100
@@ -36,16 +42,47 @@ function computeTrend(current: number, previous: number): MetricTrend {
   }
 }
 
-function periodWindows(period: AnalyticsPeriod, now = new Date()): {
-  currentStart: Date; currentEnd: Date; previousStart: Date; previousEnd: Date
-} {
-  const days = PERIOD_DAYS[period]
-  const ms   = days * 24 * 60 * 60 * 1000
-  const currentEnd    = now
-  const currentStart  = new Date(now.getTime() - ms)
-  const previousEnd   = currentStart
-  const previousStart = new Date(currentStart.getTime() - ms)
-  return { currentStart, currentEnd, previousStart, previousEnd }
+const DAY_MS = 24 * 60 * 60 * 1000
+const ALL_TIME_START = new Date(Date.UTC(2020, 0, 1))
+const MAX_SERIES_DAYS = 400
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+type Windows = { currentStart: Date; currentEnd: Date; previousStart: Date; previousEnd: Date }
+
+// Windows are whole UTC days ending at the *start of tomorrow* (exclusive), so
+// "today" is always inside the current window. Earnings are stored per
+// timestamp and engagement per UTC day; aligning both to day boundaries keeps
+// every metric on the card measuring exactly the same span.
+export function trailingWindows(days: number, now = new Date()): Windows {
+  const todayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  const currentEnd = new Date(todayStart + DAY_MS)
+  const currentStart = new Date(currentEnd.getTime() - days * DAY_MS)
+  const previousStart = new Date(currentStart.getTime() - days * DAY_MS)
+  return { currentStart, currentEnd, previousStart, previousEnd: currentStart }
+}
+
+export function periodWindows(period: AnalyticsPeriod, now = new Date()): Windows & { comparable: boolean } {
+  if (period === 'all') {
+    const { currentEnd } = trailingWindows(1, now)
+    return {
+      currentStart: ALL_TIME_START,
+      currentEnd,
+      previousStart: ALL_TIME_START,
+      previousEnd: ALL_TIME_START,
+      comparable: false,
+    }
+  }
+  return { ...trailingWindows(PERIOD_DAYS[period], now), comparable: true }
+}
+
+function scoreTrend(current: number | null, previous: number | null): ScoreTrend {
+  if (current === null || previous === null || previous === 0) return null
+  const { change_percent, direction } = computeTrend(current, previous)
+  return { change_percent, direction }
+}
+
+function isIsoDate(value: string): boolean {
+  return ISO_DATE.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`))
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -70,6 +107,7 @@ const SCORE_WEIGHTS = {
 } as const
 
 const ENGAGEMENT_WINDOW_DAYS = 90
+const SATISFACTION_TREND_WINDOW_DAYS = 30
 const ENGAGEMENT_RATE_CEILING = 0.10   // a 10% like-through rate scores 100
 const ENGAGEMENT_MIN_VIEWS_FOR_SIGNAL = 20   // below this, treat as cold-start
 const COLD_START_SATISFACTION_SCORE = 70     // no reviews yet — neutral, not punitive
@@ -132,23 +170,25 @@ export const analyticsService = {
   // ── Overview ───────────────────────────────────────────────────────────────
 
   async getOverview(sellerId: string, period: AnalyticsPeriod = 'month'): Promise<AnalyticsOverview> {
-    const { currentStart, currentEnd, previousStart, previousEnd } = periodWindows(period)
+    const { currentStart, currentEnd, previousStart, previousEnd, comparable } = periodWindows(period)
 
     const [current, previous, balance] = await Promise.all([
       analyticsRepository.getPeriodMetrics(sellerId, currentStart, currentEnd),
-      analyticsRepository.getPeriodMetrics(sellerId, previousStart, previousEnd),
+      comparable
+        ? analyticsRepository.getPeriodMetrics(sellerId, previousStart, previousEnd)
+        : Promise.resolve({ earnings: 0, sales_count: 0, withdrawals: 0, views: 0, likes: 0 }),
       walletRepository.getBalanceSummary(sellerId),
     ])
 
     return {
-      total_earnings:     computeTrend(current.earnings, previous.earnings),
+      total_earnings:     computeTrend(current.earnings, previous.earnings, comparable),
       available_balance:  balance.available_balance,
       pending_balance:     balance.pending_balance,
       hold_balance:         balance.hold_balance,
-      total_withdrawals:  computeTrend(current.withdrawals, previous.withdrawals),
-      total_sales:        computeTrend(current.sales_count, previous.sales_count),
-      total_views:        computeTrend(current.views, previous.views),
-      total_likes:        computeTrend(current.likes, previous.likes),
+      total_withdrawals:  computeTrend(current.withdrawals, previous.withdrawals, comparable),
+      total_sales:        computeTrend(current.sales_count, previous.sales_count, comparable),
+      total_views:        computeTrend(current.views, previous.views, comparable),
+      total_likes:        computeTrend(current.likes, previous.likes, comparable),
       period,
     }
   },
@@ -161,6 +201,22 @@ export const analyticsService = {
       throw new ValidationError('Validation failed', { year: `year must be between 2020 and ${currentYear}` })
     }
     return analyticsRepository.getDailyEarnings(sellerId, year)
+  },
+
+  // ── Daily series (arbitrary UTC date range) ────────────────────────────────
+
+  async getDailySeries(sellerId: string, from: string, to: string): Promise<DailySeriesPoint[]> {
+    if (!isIsoDate(from) || !isIsoDate(to)) {
+      throw new ValidationError('Validation failed', { from: 'from and to must be YYYY-MM-DD dates' })
+    }
+    const spanDays = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS) + 1
+    if (spanDays < 1) {
+      throw new ValidationError('Validation failed', { to: 'to must not be before from' })
+    }
+    if (spanDays > MAX_SERIES_DAYS) {
+      throw new ValidationError('Validation failed', { to: `range must not exceed ${MAX_SERIES_DAYS} days` })
+    }
+    return analyticsRepository.getDailySeries(sellerId, from, to)
   },
 
   // ── Sales feed ─────────────────────────────────────────────────────────────
@@ -183,11 +239,13 @@ export const analyticsService = {
     metric: TopArtworkMetric = 'earnings',
     limit = 5
   ): Promise<TopArtwork[]> {
-    const { currentStart, currentEnd, previousStart, previousEnd } = periodWindows(period)
+    const { currentStart, currentEnd, previousStart, previousEnd, comparable } = periodWindows(period)
 
     const [current, previous] = await Promise.all([
       analyticsRepository.getArtworkPerformance(sellerId, currentStart, currentEnd),
-      analyticsRepository.getArtworkPerformance(sellerId, previousStart, previousEnd),
+      comparable
+        ? analyticsRepository.getArtworkPerformance(sellerId, previousStart, previousEnd)
+        : Promise.resolve([]),
     ])
 
     const previousByArtwork = new Map(previous.map((row) => [row.artwork_id, row]))
@@ -198,9 +256,10 @@ export const analyticsService = {
         artwork_id:    row.artwork_id,
         artwork_title: row.artwork_title,
         thumbnail_url: row.thumbnail_url,
-        earnings:      computeTrend(row.earnings, prev?.earnings ?? 0),
-        sales:         computeTrend(row.sales_count, prev?.sales_count ?? 0),
-        engagement:    computeTrend(row.views + row.likes, (prev?.views ?? 0) + (prev?.likes ?? 0)),
+        earnings:      computeTrend(row.earnings, prev?.earnings ?? 0, comparable),
+        sales:         computeTrend(row.sales_count, prev?.sales_count ?? 0, comparable),
+        engagement:    computeTrend(row.views + row.likes, (prev?.views ?? 0) + (prev?.likes ?? 0), comparable),
+        views_trend:   computeTrend(row.views, prev?.views ?? 0, comparable),
         views:         row.views,
         likes:         row.likes,
       }
@@ -209,6 +268,7 @@ export const analyticsService = {
     const metricValue = (item: TopArtwork): number =>
       metric === 'earnings' ? item.earnings.current
       : metric === 'sales'  ? item.sales.current
+      : metric === 'views'  ? item.views
       : item.engagement.current
 
     return items.sort((a, b) => metricValue(b) - metricValue(a)).slice(0, Math.max(1, Math.min(50, limit)))
@@ -218,56 +278,68 @@ export const analyticsService = {
 
   async getArtsonyScore(sellerId: string): Promise<ArtsonyScoreBreakdown> {
     const now = new Date()
-    const engagementStart = new Date(now.getTime() - ENGAGEMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+    const engagement = trailingWindows(ENGAGEMENT_WINDOW_DAYS, now)
+    const reviews = trailingWindows(SATISFACTION_TREND_WINDOW_DAYS, now)
 
-    const [ratingStats, reliability, engagementMetrics] = await Promise.all([
+    const [
+      ratingStats, reliability, engagementMetrics, previousEngagementMetrics, currentReviews, previousReviews,
+    ] = await Promise.all([
       reviewRepository.getSellerRatingStats(sellerId),
       analyticsRepository.getReliabilityStats(sellerId),
-      analyticsRepository.getPeriodMetrics(sellerId, engagementStart, now),
+      analyticsRepository.getPeriodMetrics(sellerId, engagement.currentStart, engagement.currentEnd),
+      analyticsRepository.getPeriodMetrics(sellerId, engagement.previousStart, engagement.previousEnd),
+      reviewRepository.getSellerAverageRatingBetween(sellerId, reviews.currentStart, reviews.currentEnd),
+      reviewRepository.getSellerAverageRatingBetween(sellerId, reviews.previousStart, reviews.previousEnd),
     ])
+
+    const hasEngagementSignal = (views: number): boolean => views >= ENGAGEMENT_MIN_VIEWS_FOR_SIGNAL
+    const likeRate = (m: { views: number; likes: number }): number | null =>
+      hasEngagementSignal(m.views) ? m.likes / m.views : null
 
     const buyerSatisfactionScore = scoreBuyerSatisfaction(ratingStats.average_rating)
     const engagementScore = scoreEngagement(engagementMetrics.views, engagementMetrics.likes)
     const orderReliabilityScore = scoreOrderReliability({
-      totalPhysical:      reliability.total_physical_items,
-      delivered:          reliability.delivered_items,
-      deliveryFailed:     reliability.delivery_failed_items,
-      cancelled:          reliability.cancelled_items,
-      refunded:           reliability.refunded_items,
+      totalPhysical: reliability.total_physical_items,
+      delivered: reliability.delivered_items,
+      deliveryFailed: reliability.delivery_failed_items,
+      cancelled: reliability.cancelled_items,
+      refunded: reliability.refunded_items,
       avgConditionRating: ratingStats.average_condition_rating,
-      avgDeliveryRating:  ratingStats.average_delivery_rating,
+      avgDeliveryRating: ratingStats.average_delivery_rating,
     })
 
     const composite =
       buyerSatisfactionScore * SCORE_WEIGHTS.buyerSatisfaction +
       orderReliabilityScore  * SCORE_WEIGHTS.orderReliability +
-      engagementScore        * SCORE_WEIGHTS.engagement
+      engagementScore * SCORE_WEIGHTS.engagement
 
     return {
       score: Math.round(composite * 100) / 100,
       buyer_satisfaction: {
-        score:          Math.round(buyerSatisfactionScore * 100) / 100,
+        score: Math.round(buyerSatisfactionScore * 100) / 100,
         average_rating: ratingStats.average_rating,
-        review_count:   ratingStats.review_count,
-        weight:         SCORE_WEIGHTS.buyerSatisfaction,
+        review_count: ratingStats.review_count,
+        weight: SCORE_WEIGHTS.buyerSatisfaction,
+        trend: scoreTrend(currentReviews.average_rating, previousReviews.average_rating),
       },
       engagement: {
-        score:           Math.round(engagementScore * 100) / 100,
-        total_views:     engagementMetrics.views,
-        total_likes:     engagementMetrics.likes,
+        score: Math.round(engagementScore * 100) / 100,
+        total_views: engagementMetrics.views,
+        total_likes: engagementMetrics.likes,
         engagement_rate: engagementMetrics.views > 0 ? engagementMetrics.likes / engagementMetrics.views : 0,
-        weight:          SCORE_WEIGHTS.engagement,
+        weight: SCORE_WEIGHTS.engagement,
+        trend: scoreTrend(likeRate(engagementMetrics), likeRate(previousEngagementMetrics)),
       },
       order_reliability: {
-        score:                     Math.round(orderReliabilityScore * 100) / 100,
-        delivered_items:           reliability.delivered_items,
-        total_physical_items:      reliability.total_physical_items,
-        delivery_failed_items:     reliability.delivery_failed_items,
-        cancelled_items:           reliability.cancelled_items,
-        refunded_items:            reliability.refunded_items,
+        score: Math.round(orderReliabilityScore * 100) / 100,
+        delivered_items: reliability.delivered_items,
+        total_physical_items: reliability.total_physical_items,
+        delivery_failed_items: reliability.delivery_failed_items,
+        cancelled_items: reliability.cancelled_items,
+        refunded_items: reliability.refunded_items,
         average_condition_rating:  ratingStats.average_condition_rating,
-        average_delivery_rating:   ratingStats.average_delivery_rating,
-        weight:                    SCORE_WEIGHTS.orderReliability,
+        average_delivery_rating: ratingStats.average_delivery_rating,
+        weight: SCORE_WEIGHTS.orderReliability,
       },
       computed_at: now,
     }

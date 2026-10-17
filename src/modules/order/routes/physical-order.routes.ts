@@ -48,10 +48,11 @@ router.use(apiRateLimit)
 // ── Buyer routes ──────────────────────────────────────────────────────────────
 
 // GET  /api/physical-orders/buyer
-//      Buyer lists all their physical order items (filterable)
+//      Buyer lists all their physical order items (filterable). ARTIST
+//      accounts are allowed because an artist can buy other artists' work.
 router.get(
   '/buyer',
-  authorize(['USER', 'ADMIN']),
+  authorize(['USER', 'ARTIST', 'ADMIN']),
   validateListFilters,
   handleBuyerList,
 )

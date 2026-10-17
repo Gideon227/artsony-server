@@ -719,6 +719,16 @@ export async function flagArtwork(
   return updated
 }
 
+// A view is audience activity: only published artworks count, and a creator
+// looking at their own work must not inflate the "Artwork Views" they read in
+// Artsony Studio.
+export function isCountableView(
+  artwork: Pick<Artwork, 'status' | 'creator_id'>,
+  requesterId?: string,
+): boolean {
+  return artwork.status === 'PUBLISHED' && artwork.creator_id !== requesterId
+}
+
 export async function trackView(
   artworkId: string,
   identity: string,

@@ -6,6 +6,7 @@ import type {
   WithdrawalDestinationDetails,
   WalletBalanceSummary,
   WalletLedgerFilters,
+  WalletLedgerListItem,
 } from '@/common/types/wallet.types'
 import type { WalletLedgerEntry, WalletLedgerEntryType, WalletLedgerCategory, WalletLedgerHoldStatus } from '@/common/types/commerce.types'
 import type { PaginatedResult } from '@/common/types/commerce.types'
@@ -14,20 +15,20 @@ import type { PaginatedResult } from '@/common/types/commerce.types'
 
 function toWithdrawal(row: any): WithdrawalRequest {
   return {
-    id:                   row['id'],
-    user_id:              row['user_id'],
-    amount:               Number(row['amount']),
-    currency:             row['currency'],
-    status:               row['status'] as WithdrawalStatus,
-    destination_type:     row['destination_type'] as WithdrawalDestinationType,
-    destination_details:  (row['destination_details'] ?? {}) as WithdrawalDestinationDetails,
-    idempotency_key:      row['idempotency_key'],
-    admin_notes:          row['admin_notes'] ?? null,
-    reviewed_by:          row['reviewed_by'] ?? null,
-    reviewed_at:          row['reviewed_at'] ? new Date(row['reviewed_at']) : null,
-    completed_at:         row['completed_at'] ? new Date(row['completed_at']) : null,
-    created_at:           new Date(row['created_at']),
-    updated_at:           new Date(row['updated_at']),
+    id: row['id'],
+    user_id: row['user_id'],
+    amount: Number(row['amount']),
+    currency: row['currency'],
+    status: row['status'] as WithdrawalStatus,
+    destination_type: row['destination_type'] as WithdrawalDestinationType,
+    destination_details: (row['destination_details'] ?? {}) as WithdrawalDestinationDetails,
+    idempotency_key: row['idempotency_key'],
+    admin_notes: row['admin_notes'] ?? null,
+    reviewed_by: row['reviewed_by'] ?? null,
+    reviewed_at: row['reviewed_at'] ? new Date(row['reviewed_at']) : null,
+    completed_at: row['completed_at'] ? new Date(row['completed_at']) : null,
+    created_at: new Date(row['created_at']),
+    updated_at: new Date(row['updated_at']),
   }
 }
 
@@ -47,6 +48,19 @@ function toLedgerEntry(row: any): WalletLedgerEntry {
     balance_after:          Number(row['balance_after']),
     description:            row['description'],
     created_at:             new Date(row['created_at']),
+  }
+}
+
+function toLedgerListItem(row: any): WalletLedgerListItem {
+  const linked = Array.isArray(row['withdrawal']) ? row['withdrawal'][0] : row['withdrawal']
+  return {
+    ...toLedgerEntry(row),
+    withdrawal: linked
+      ? {
+          status:              linked['status'] as WithdrawalStatus,
+          destination_details: (linked['destination_details'] ?? {}) as WithdrawalDestinationDetails,
+        }
+      : null,
   }
 }
 
@@ -81,7 +95,7 @@ export const walletRepository = {
   async listLedger(
     userId: string,
     filters: WalletLedgerFilters
-  ): Promise<PaginatedResult<WalletLedgerEntry>> {
+  ): Promise<PaginatedResult<WalletLedgerListItem>> {
     const page  = Math.max(1, filters.page ?? 1)
     const limit = Math.min(100, Math.max(1, filters.limit ?? 20))
     const from  = (page - 1) * limit
@@ -89,7 +103,7 @@ export const walletRepository = {
 
     let query = (supabase() as any)
       .from('wallet_ledger')
-      .select('*', { count: 'exact' })
+      .select('*, withdrawal:withdrawal_requests(status, destination_details)', { count: 'exact' })
       .eq('user_id', userId)
 
     if (filters.category)    query = query.eq('category', filters.category)
@@ -108,7 +122,7 @@ export const walletRepository = {
     const total_pages = Math.ceil(total / limit)
 
     return {
-      data:        (result.data ?? []).map(toLedgerEntry),
+      data:        (result.data ?? []).map(toLedgerListItem),
       total,
       page,
       limit,
@@ -216,13 +230,13 @@ export const walletRepository = {
     const total_pages = Math.ceil(total / limit)
 
     return {
-      data:        (result.data ?? []).map(toWithdrawal),
+      data: (result.data ?? []).map(toWithdrawal),
       total,
       page,
       limit,
       total_pages,
-      has_next:    page < total_pages,
-      has_prev:    page > 1,
+      has_next: page < total_pages,
+      has_prev: page > 1,
     }
   },
 }

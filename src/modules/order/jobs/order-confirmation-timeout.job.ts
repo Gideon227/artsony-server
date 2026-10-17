@@ -59,7 +59,7 @@ export async function cancelConfirmationTimeout(physicalId: string): Promise<voi
 orderConfirmationQueue.process(async (job) => {
   const { physicalId, orderId } = job.data
 
-  const physical = await physicalOrderRepository.findByOrderItemId(physicalId)
+  const physical = await physicalOrderRepository.findById(physicalId)
     .catch(() => null)
 
   // If item no longer exists or is already past the cancellable window, skip.

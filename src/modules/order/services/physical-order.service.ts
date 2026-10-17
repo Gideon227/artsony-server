@@ -21,6 +21,7 @@ import type {
   RefundRequest,
   OrderInvoice,
   OrderReceipt,
+  OrderItem,
   PhysicalOrderFilters,
   BuyerOrderView,
   ArtistOrderView,
@@ -219,7 +220,7 @@ export const physicalOrderService = {
   }): Promise<OrderItemPhysical> {
     assertRole(input.actorRole, ['ARTIST', 'ADMIN'])
 
-    const physical = await physicalOrderRepository.findByOrderItemId(input.physicalId)
+    const physical = await physicalOrderRepository.findById(input.physicalId)
     if (!physical) throw new NotFoundError('Physical order item')
 
     if (input.actorRole === 'ARTIST') {
@@ -282,7 +283,7 @@ export const physicalOrderService = {
   }): Promise<OrderItemPhysical> {
     assertRole(input.actorRole, ['ADMIN'])
 
-    const physical = await physicalOrderRepository.findByOrderItemId(input.physicalId)
+    const physical = await physicalOrderRepository.findById(input.physicalId)
     if (!physical) throw new NotFoundError('Physical order item')
 
     assertValidTransition(physical.timeline_status, 'AWAITING_PICKUP_ACTIVE')
@@ -359,7 +360,7 @@ export const physicalOrderService = {
   }): Promise<OrderItemPhysical> {
     assertRole(input.actorRole, ['ADMIN'])
 
-    const physical = await physicalOrderRepository.findByOrderItemId(input.physicalId)
+    const physical = await physicalOrderRepository.findById(input.physicalId)
     if (!physical) throw new NotFoundError('Physical order item')
 
     assertValidTransition(physical.timeline_status, 'IN_TRANSIT_ACTIVE')
@@ -405,7 +406,7 @@ export const physicalOrderService = {
   }): Promise<OrderItemPhysical> {
     assertRole(input.actorRole, ['ADMIN'])
 
-    const physical = await physicalOrderRepository.findByOrderItemId(input.physicalId)
+    const physical = await physicalOrderRepository.findById(input.physicalId)
     if (!physical) throw new NotFoundError('Physical order item')
 
     assertValidTransition(physical.timeline_status, 'OUT_FOR_DELIVERY_ACTIVE')
@@ -447,7 +448,7 @@ export const physicalOrderService = {
   }): Promise<OrderItemPhysical> {
     assertRole(input.actorRole, ['ADMIN'])
 
-    const physical = await physicalOrderRepository.findByOrderItemId(input.physicalId)
+    const physical = await physicalOrderRepository.findById(input.physicalId)
     if (!physical) throw new NotFoundError('Physical order item')
 
     assertValidTransition(physical.timeline_status, 'DELIVERED')
@@ -504,7 +505,7 @@ export const physicalOrderService = {
   }): Promise<OrderItemPhysical> {
     assertRole(input.actorRole, ['ADMIN'])
 
-    const physical = await physicalOrderRepository.findByOrderItemId(input.physicalId)
+    const physical = await physicalOrderRepository.findById(input.physicalId)
     if (!physical) throw new NotFoundError('Physical order item')
 
     assertValidTransition(physical.timeline_status, 'DELIVERY_FAILED')
@@ -545,7 +546,7 @@ export const physicalOrderService = {
   }): Promise<OrderItemPhysical> {
     assertRole(input.actorRole, ['ADMIN'])
 
-    const physical = await physicalOrderRepository.findByOrderItemId(input.physicalId)
+    const physical = await physicalOrderRepository.findById(input.physicalId)
     if (!physical) throw new NotFoundError('Physical order item')
 
     assertValidTransition(physical.timeline_status, 'DELAYED_DELIVERY')
@@ -590,7 +591,7 @@ export const physicalOrderService = {
   }): Promise<OrderItemPhysical> {
     assertRole(input.actorRole, ['ADMIN'])
 
-    const physical = await physicalOrderRepository.findByOrderItemId(input.physicalId)
+    const physical = await physicalOrderRepository.findById(input.physicalId)
     if (!physical) throw new NotFoundError('Physical order item')
 
     assertValidTransition(physical.timeline_status, input.reason)
@@ -623,7 +624,7 @@ export const physicalOrderService = {
   }): Promise<OrderItemPhysical> {
     assertRole(input.actorRole, ['ADMIN'])
 
-    const physical = await physicalOrderRepository.findByOrderItemId(input.physicalId)
+    const physical = await physicalOrderRepository.findById(input.physicalId)
     if (!physical) throw new NotFoundError('Physical order item')
 
     if (physical.delivery_status === 'DELIVERED' || physical.delivery_status === 'CANCELLED') {
@@ -654,11 +655,16 @@ export const physicalOrderService = {
     if (!locked) throw new ConflictError('This order item is already being processed. Please try again.')
 
     try {
-      const physical = await physicalOrderRepository.findByOrderItemId(input.physicalId)
+      const physical = await physicalOrderRepository.findById(input.physicalId)
       if (!physical) throw new NotFoundError('Physical order item')
 
       if (physical.delivery_status === 'CANCELLED') throw new ConflictError('This item has already been cancelled')
       if (physical.timeline_status === 'DELIVERED') throw new ForbiddenError('Cannot cancel a delivered order. Request a refund instead.')
+
+      // An ARTIST account can also be the buyer of someone else's artwork, so
+      // the cancelling party is resolved from the order itself rather than
+      // from the account role alone.
+      let actorRole: 'admin' | 'artist' | 'buyer' = 'admin'
 
       if (input.actorRole !== 'ADMIN') {
         assertRole(input.actorRole, ['USER', 'ARTIST'])
@@ -667,18 +673,23 @@ export const physicalOrderService = {
           throw new ForbiddenError('Cancellation is no longer possible at this stage. Contact support.')
         }
 
-        if (input.actorRole === 'ARTIST') {
-          const sellerId = await getOrderItemSellerIdDirect(physical.order_item_id)
-          if (sellerId !== input.actorId) throw new ForbiddenError('You are not the seller of this item')
+        const [orderBuyerId, itemSellerId] = await Promise.all([
+          getOrderBuyerIdDirect(physical.order_id),
+          getOrderItemSellerIdDirect(physical.order_item_id),
+        ])
+
+        if (orderBuyerId === input.actorId) {
+          actorRole = 'buyer'
+        } else if (input.actorRole === 'ARTIST' && itemSellerId === input.actorId) {
+          actorRole = 'artist'
         } else {
-          const buyerId = await getOrderBuyerIdDirect(physical.order_id)
-          if (buyerId !== input.actorId) throw new ForbiddenError('You are not the buyer of this order')
+          throw new ForbiddenError(
+            input.actorRole === 'ARTIST'
+              ? 'You are not the buyer or seller of this item'
+              : 'You are not the buyer of this order',
+          )
         }
       }
-
-      const actorRole = input.actorRole === 'ADMIN' ? 'admin'
-                      : input.actorRole === 'ARTIST' ? 'artist'
-                      : 'buyer' as const
 
       const { physical: cancelled } = await physicalOrderRepository.transitionStatus({
         physicalId: physical.id,
@@ -724,7 +735,7 @@ export const physicalOrderService = {
   }): Promise<RefundRequest> {
     assertRole(input.actorRole, ['ARTIST'])
 
-    const physical = await physicalOrderRepository.findByOrderItemId(input.physicalId)
+    const physical = await physicalOrderRepository.findById(input.physicalId)
     if (!physical) throw new NotFoundError('Physical order item')
 
     const sellerId = await getOrderItemSellerIdDirect(physical.order_item_id)
@@ -779,7 +790,7 @@ export const physicalOrderService = {
     const request    = allPending.find(r => r.id === input.requestId)
     if (!request) throw new NotFoundError('Refund request')
 
-    const physical = await physicalOrderRepository.findByOrderItemId(request.order_item_physical_id)
+    const physical = await physicalOrderRepository.findById(request.order_item_physical_id)
     if (!physical) throw new NotFoundError('Physical order item')
 
     const refundRequestPatch: { status: RefundRequest['status']; reviewed_by: string; admin_notes?: string } = {
@@ -895,7 +906,7 @@ export const physicalOrderService = {
   }): Promise<DeliveryProof> {
     assertRole(input.actorRole, ['ADMIN'])
 
-    const physical = await physicalOrderRepository.findByOrderItemId(input.physicalId)
+    const physical = await physicalOrderRepository.findById(input.physicalId)
     if (!physical) throw new NotFoundError('Physical order item')
 
     if (physical.timeline_status !== 'DELIVERED') {
@@ -923,6 +934,8 @@ export const physicalOrderService = {
     invoice:          OrderInvoice | null
     receipt:          OrderReceipt | null
     refund_requests:  RefundRequest[]
+    order_item:       OrderItem
+    order_number:     string | null
     delivery_address: {
       full_name: string
       phone: string
@@ -936,34 +949,42 @@ export const physicalOrderService = {
     buyer:  { id: string; username: string; avatar_url: string | null } | null
     seller: { id: string; username: string; avatar_url: string | null } | null
   }> {
-    const physical = await physicalOrderRepository.findByOrderItemId(physicalId)
+    const physical = await physicalOrderRepository.findById(physicalId)
     if (!physical) throw new NotFoundError('Physical order item')
 
-    if (requesterRole === 'USER') {
-      const buyerId = await getOrderBuyerIdDirect(physical.order_id)
-      if (buyerId !== requesterId) throw new ForbiddenError('Access denied')
-    } else if (requesterRole === 'ARTIST') {
-      const sellerId = await getOrderItemSellerIdDirect(physical.order_item_id)
-      if (sellerId !== requesterId) throw new ForbiddenError('Access denied')
+    const [buyerId, sellerId] = await Promise.all([
+      getOrderBuyerIdDirect(physical.order_id),
+      getOrderItemSellerIdDirect(physical.order_item_id),
+    ])
+
+    // An ARTIST account can be the seller of this item or, like any other
+    // account, the buyer of it; a USER account can only ever be the buyer.
+    if (requesterRole === 'USER' && buyerId !== requesterId) {
+      throw new ForbiddenError('Access denied')
+    }
+    if (requesterRole === 'ARTIST' && buyerId !== requesterId && sellerId !== requesterId) {
+      throw new ForbiddenError('Access denied')
     }
 
-    const [timeline, delivery_proofs, invoice, receipt, refund_requests, delivery_address, buyerId, sellerId] = await Promise.all([
+    const [timeline, delivery_proofs, invoice, receipt, refund_requests, delivery_address, order_item, order_number] = await Promise.all([
       physicalOrderRepository.getTimeline(physical.id),
       physicalOrderRepository.getDeliveryProofs(physical.id),
       physicalOrderRepository.getLatestInvoice(physical.order_id),
       physicalOrderRepository.getReceipt(physical.order_id),
       physicalOrderRepository.getRefundRequests(physical.order_id),
       physicalOrderRepository.getShippingAddress(physical.order_id),
-      getOrderBuyerIdDirect(physical.order_id),
-      getOrderItemSellerIdDirect(physical.order_item_id),
+      physicalOrderRepository.getOrderItem(physical.order_item_id),
+      physicalOrderRepository.getOrderNumber(physical.order_id),
     ])
+
+    if (!order_item) throw new NotFoundError('Order item')
 
     const [buyer, seller] = await Promise.all([
       buyerId  ? physicalOrderRepository.getUserProfile(buyerId)  : Promise.resolve(null),
       sellerId ? physicalOrderRepository.getUserProfile(sellerId) : Promise.resolve(null),
     ])
 
-    return { physical, timeline, delivery_proofs, invoice, receipt, refund_requests, delivery_address, buyer, seller }
+    return { physical, timeline, delivery_proofs, invoice, receipt, refund_requests, order_item, order_number, delivery_address, buyer, seller }
   },
 
   // ── List helpers ───────────────────────────────────────────────────────────
@@ -1128,7 +1149,7 @@ export const physicalOrderService = {
   // ── notifyAutoCancel ───────────────────────────────────────────────────────
 
   async notifyAutoCancel(physicalId: string, orderId: string): Promise<void> {
-    const physical = await physicalOrderRepository.findByOrderItemId(physicalId).catch(() => null)
+    const physical = await physicalOrderRepository.findById(physicalId).catch(() => null)
     if (!physical) return
 
     const orderNumber     = await physicalOrderRepository.getOrderNumber(orderId)
@@ -1168,7 +1189,7 @@ export const physicalOrderService = {
     eventNotes:  string
     metadata?:   Record<string, unknown>
   }): Promise<OrderItemPhysical> {
-    const physical = await physicalOrderRepository.findByOrderItemId(input.physicalId)
+    const physical = await physicalOrderRepository.findById(input.physicalId)
     if (!physical) throw new NotFoundError('Physical order item')
 
     assertValidTransition(physical.timeline_status, input.newStatus)

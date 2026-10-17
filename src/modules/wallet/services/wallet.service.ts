@@ -8,7 +8,7 @@ import {
   ForbiddenError,
   ConflictError,
 } from '@/common/errors'
-import { WITHDRAWAL_TRANSITIONS } from '@/common/types/wallet.types'
+import { WITHDRAWAL_TRANSITIONS, WITHDRAWAL_NETWORKS } from '@/common/types/wallet.types'
 import { compact } from '@/common/utils/object.utils'
 import type {
   WithdrawalRequest,
@@ -17,8 +17,9 @@ import type {
   WithdrawalDestinationDetails,
   WalletBalanceSummary,
   WalletLedgerFilters,
+  WalletLedgerListItem,
 } from '@/common/types/wallet.types'
-import type { WalletLedgerEntry, PaginatedResult } from '@/common/types/commerce.types'
+import type { PaginatedResult } from '@/common/types/commerce.types'
 import { config } from '@/config'
 import type { NotificationEvent } from '@/common/constants/notification-event'
 
@@ -26,18 +27,27 @@ import type { NotificationEvent } from '@/common/constants/notification-event'
 // No payout provider is integrated — this only validates shape so the admin
 // has enough information to execute the transfer manually.
 
+const ADDRESS_PATTERNS: Record<(typeof WITHDRAWAL_NETWORKS)[number], RegExp> = {
+  TRON:     /^T[1-9A-HJ-NP-Za-km-z]{33}$/,
+  ETHEREUM: /^0x[a-fA-F0-9]{40}$/,
+  BSC:      /^0x[a-fA-F0-9]{40}$/,
+}
+
 function assertValidDestination(
   type: WithdrawalDestinationType,
   details: WithdrawalDestinationDetails
 ): void {
   if (type === 'WALLET_ADDRESS') {
-    if (!details.wallet_address || details.wallet_address.trim().length < 10) {
+    const network = details.network
+    if (!network || !WITHDRAWAL_NETWORKS.includes(network)) {
       throw new ValidationError('Validation failed', {
-        wallet_address: 'A valid wallet_address is required for WALLET_ADDRESS withdrawals',
+        network: `network must be one of ${WITHDRAWAL_NETWORKS.join(', ')}`,
       })
     }
-    if (!details.network) {
-      throw new ValidationError('Validation failed', { network: 'network is required' })
+    if (!details.wallet_address || !ADDRESS_PATTERNS[network].test(details.wallet_address.trim())) {
+      throw new ValidationError('Validation failed', {
+        wallet_address: `wallet_address is not a valid ${network} address`,
+      })
     }
     return
   }
@@ -70,7 +80,7 @@ export const walletService = {
   async listLedger(
     userId: string,
     filters: WalletLedgerFilters
-  ): Promise<PaginatedResult<WalletLedgerEntry>> {
+  ): Promise<PaginatedResult<WalletLedgerListItem>> {
     return walletRepository.listLedger(userId, filters)
   },
 

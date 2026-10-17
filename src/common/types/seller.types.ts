@@ -16,6 +16,7 @@ export type SellerRegistration = {
   country: string
   city: string | null
   postal_code: string | null
+  email_verified_at: Date | null
   status: SellerRegistrationStatus
   reviewed_by: string | null
   review_notes: string | null
@@ -33,10 +34,13 @@ export type SubmitSellerRegistrationInput = {
   address: string
   state: string
   country: string
+  city?: string
   postal_code?: string
 }
 
-export type UpdateSellerRegistrationInput = Partial<SubmitSellerRegistrationInput>
+// email is deliberately not editable after submission: it is verified with an
+// emailed code at submit time, and an edit would bypass that proof.
+export type UpdateSellerRegistrationInput = Partial<Omit<SubmitSellerRegistrationInput, 'email'>>
 
 export type SellerRegistrationFilters = {
   status?: SellerRegistrationStatus

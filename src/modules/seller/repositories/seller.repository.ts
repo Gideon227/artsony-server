@@ -17,6 +17,7 @@ import type { PaginatedResult } from '@/common/types/commerce.types'
 function toSellerRegistration(row: any): SellerRegistration {
   return {
     ...(row as SellerRegistration),
+    ['email_verified_at']: row['email_verified_at'] ? new Date(row['email_verified_at']) : null,
     ['created_at']: new Date(row['created_at']),
     ['updated_at']: new Date(row['updated_at']),
   }
@@ -88,7 +89,11 @@ export const sellerRepository = {
   // the service layer can detect a 23505 conflict and translate it into a
   // ConflictError (repositories in this codebase never throw domain errors
   // directly — see user.repository.ts / session.repository.ts).
-  async submit(userId: string, input: SubmitSellerRegistrationInput): Promise<SellerRegistration> {
+  async submit(
+    userId: string,
+    input: SubmitSellerRegistrationInput,
+    emailVerifiedAt: Date,
+  ): Promise<SellerRegistration> {
     const result = await (supabase() as any).rpc('submit_seller_registration', {
       ['p_user_id']: userId,
       ['p_full_name']: input.full_name,
@@ -99,6 +104,8 @@ export const sellerRepository = {
       ['p_state']: input.state,
       ['p_country']: input.country,
       ['p_postal_code']: input.postal_code ?? null,
+      ['p_city']: input.city ?? null,
+      ['p_email_verified_at']: emailVerifiedAt.toISOString(),
     })
 
     if (result.error) {

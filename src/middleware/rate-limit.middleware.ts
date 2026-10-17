@@ -128,6 +128,22 @@ export const uploadSignRateLimit = rateLimit({
   store: new RedisStore('rl:upload-sign:', UPLOAD_SIGN_WINDOW_MS) as never,
 })
 
+// ─── Seller email code: per user, 15 requests per 15 minutes ──────────────────
+// Covers both sending and verifying; sending is additionally limited by a
+// cooldown and a daily cap, verifying by a per-code attempt limit.
+
+const SELLER_EMAIL_CODE_WINDOW_MS = 15 * 60 * 1000
+
+export const sellerEmailCodeRateLimit = rateLimit({
+  windowMs: SELLER_EMAIL_CODE_WINDOW_MS,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.auth?.sub ?? req.ip ?? 'unknown',
+  handler,
+  store: new RedisStore('rl:seller-email-code:', SELLER_EMAIL_CODE_WINDOW_MS) as never,
+})
+
 // ─── Slow-down: progressively delay after 5 requests ─────────────────────────
 
 export const loginSlowDown = slowDown({

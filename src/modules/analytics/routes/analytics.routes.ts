@@ -4,12 +4,14 @@ import { apiRateLimit } from '@/middleware/rate-limit.middleware'
 import {
   handleGetOverview,
   handleGetDailyEarnings,
+  handleGetDailySeries,
   handleGetSalesAnalytics,
   handleGetTopArtworks,
   handleGetArtsonyScore,
   handleGetCommentAnalytics,
   overviewValidation,
   dailyEarningsValidation,
+  dailySeriesValidation,
   salesAnalyticsValidation,
   topArtworksValidation,
   scoreValidation,
@@ -27,6 +29,7 @@ router.use(apiRateLimit)
 
 router.get('/overview',        overviewValidation,        handleGetOverview)
 router.get('/earnings/daily',  dailyEarningsValidation,    handleGetDailyEarnings)
+router.get('/daily-series',    dailySeriesValidation,      handleGetDailySeries)
 router.get('/sales',           salesAnalyticsValidation,   handleGetSalesAnalytics)
 router.get('/top-artworks',    topArtworksValidation,      handleGetTopArtworks)
 router.get('/score',           scoreValidation,            handleGetArtsonyScore)

@@ -159,6 +159,51 @@ function baseTemplate(content: string): string {
 </html>`
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+export type SellerApplicationEmailKind = 'APPROVED' | 'REJECTED' | 'SUSPENDED' | 'REACTIVATED'
+
+const SELLER_APPLICATION_COPY: Record<
+  SellerApplicationEmailKind,
+  { subject: string; heading: string; body: string; cta: string; path: string }
+> = {
+  APPROVED: {
+    subject: 'Your Artsony seller application was approved',
+    heading: "You're now an Artsony seller",
+    body: 'Your seller application has been approved. You can now list artwork for sale, manage orders and receive payouts.',
+    cta: 'Upload Artwork',
+    path: '/artworks/upload',
+  },
+  REJECTED: {
+    subject: 'Update on your Artsony seller application',
+    heading: "We couldn't approve your application",
+    body: 'After reviewing your seller application we were unable to approve it. You can update your details and apply again.',
+    cta: 'Review Application',
+    path: '/seller-registration',
+  },
+  SUSPENDED: {
+    subject: 'Your Artsony seller account was suspended',
+    heading: 'Your seller account is suspended',
+    body: 'Your seller privileges have been paused and your marketplace listings are hidden. Your likes, comments and saves are kept.',
+    cta: 'View Details',
+    path: '/seller-registration',
+  },
+  REACTIVATED: {
+    subject: 'Your Artsony seller account was reactivated',
+    heading: 'Your seller account is active again',
+    body: 'Your seller privileges have been restored and your paused marketplace listings are live again.',
+    cta: 'Open Studio',
+    path: '/artsony-studio',
+  },
+}
+
 // ─── Public interface ─────────────────────────────────────────────────────────
 
 export const emailService = {
@@ -213,6 +258,69 @@ export const emailService = {
       subject: "Welcome to Artsony — let's get started",
       html,
       text: `Welcome to Artsony! Visit ${config.app.frontendUrl}/onboarding to set up your profile.`,
+    })
+  },
+
+  async sendSellerVerificationCode(input: {
+    to: string
+    code: string
+    expiryMinutes: number
+  }): Promise<void> {
+    const html = baseTemplate(`
+      <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#25282D;">Verify your email</h2>
+      <p style="margin:0 0 24px;font-size:15px;color:#525965;line-height:1.6;">
+        Use this code to verify your email address for your Artsony seller application.
+        It expires in <strong>${input.expiryMinutes} minutes</strong>.
+      </p>
+      <p style="margin:0 0 24px;font-size:36px;font-weight:700;letter-spacing:12px;color:#F25B38;">
+        ${escapeHtml(input.code)}
+      </p>
+      <p style="margin:0;font-size:13px;color:#788191;">
+        Never share this code with anyone. Artsony will never ask you for it.
+      </p>
+    `)
+
+    await enqueue({
+      to: input.to,
+      subject: 'Your Artsony seller verification code',
+      html,
+      text: `Your Artsony seller verification code is ${input.code}. It expires in ${input.expiryMinutes} minutes. Never share it with anyone.`,
+    })
+  },
+
+  async sendSellerApplicationUpdate(input: {
+    to: string
+    name: string
+    kind: SellerApplicationEmailKind
+    notes?: string | null
+  }): Promise<void> {
+    const copy = SELLER_APPLICATION_COPY[input.kind]
+    const link = `${config.app.frontendUrl}${copy.path}`
+    const notes = input.notes?.trim()
+
+    const html = baseTemplate(`
+      <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#25282D;">${escapeHtml(copy.heading)}</h2>
+      <p style="margin:0 0 16px;font-size:15px;color:#525965;line-height:1.6;">Hi ${escapeHtml(input.name)},</p>
+      <p style="margin:0 0 24px;font-size:15px;color:#525965;line-height:1.6;">${escapeHtml(copy.body)}</p>
+      ${
+        notes
+          ? `<p style="margin:0 0 24px;padding:16px;border-radius:12px;background:#F5FAFA;font-size:14px;color:#525965;line-height:1.6;">
+        <strong>Note from our team:</strong><br/>${escapeHtml(notes)}
+      </p>`
+          : ''
+      }
+      <a href="${link}"
+         style="display:inline-block;background:#F25B38;color:#fff;font-weight:600;font-size:15px;
+                padding:14px 32px;border-radius:999px;text-decoration:none;">
+        ${escapeHtml(copy.cta)}
+      </a>
+    `)
+
+    await enqueue({
+      to: input.to,
+      subject: copy.subject,
+      html,
+      text: `${copy.heading}. ${copy.body}${notes ? ` Note from our team: ${notes}` : ''} ${link}`,
     })
   },
 

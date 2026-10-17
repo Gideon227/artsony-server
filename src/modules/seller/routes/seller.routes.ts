@@ -1,8 +1,10 @@
 import { Router } from 'express'
 import { requireAuth, authorize } from '@/middleware/auth.middleware'
-import { apiRateLimit } from '@/middleware/rate-limit.middleware'
+import { apiRateLimit, sellerEmailCodeRateLimit } from '@/middleware/rate-limit.middleware'
 import {
   handleSubmitRegistration,
+  handleSendEmailCode,
+  handleVerifyEmailCode,
   handleGetMyRegistration,
   handleUpdateMyRegistration,
   handleUpdateDispatchAddress,
@@ -13,6 +15,8 @@ import {
   handleSuspend,
   handleReactivate,
   submitRegistrationValidation,
+  sendEmailCodeValidation,
+  verifyEmailCodeValidation,
   updateRegistrationValidation,
   updateDispatchAddressValidation,
   idParamValidation,
@@ -30,6 +34,14 @@ router.use(apiRateLimit)
 // Registered before any admin/:id routes below — /me is a literal segment,
 // but keeping this ordering explicit matches the convention already used in
 // physical-order.routes.ts (literal paths before param routes).
+
+// POST /api/seller-registrations/email-code
+//      Email a 4-digit code to the address the applicant wants to register with
+router.post('/email-code', sellerEmailCodeRateLimit, sendEmailCodeValidation, handleSendEmailCode)
+
+// POST /api/seller-registrations/email-code/verify
+//      Check the code; on success a short-lived proof is stored that submit requires
+router.post('/email-code/verify', sellerEmailCodeRateLimit, verifyEmailCodeValidation, handleVerifyEmailCode)
 
 // POST /api/seller-registrations
 //      Submit a new registration, or resubmit (edit) a REJECTED one back to PENDING

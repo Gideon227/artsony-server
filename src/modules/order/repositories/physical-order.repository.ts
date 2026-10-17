@@ -16,6 +16,7 @@ import type {
   CourierServiceType,
 } from '@/common/types/commerce.types'
 import type { Order, OrderItem } from '@/common/types/commerce.types'
+import { toOrderItem } from './order.repository'
 
 // ── Row → Domain mappers ──────────────────────────────────────────────────────
 
@@ -64,8 +65,10 @@ const PHYSICAL_LIST_EMBED = `
     artwork_title,
     artwork_slug,
     artwork_thumbnail_url,
+    artwork_format,
     unit_price,
     quantity,
+    created_at,
     seller:users!order_items_seller_id_fkey (
       id,
       profile:profiles ( username, display_name, avatar_url )
@@ -103,12 +106,55 @@ function toPhysicalListEntry(row: any): OrderItemPhysicalListEntry {
       artwork_title:         orderItem?.artwork_title ?? 'Untitled artwork',
       artwork_slug:          orderItem?.artwork_slug ?? '',
       artwork_thumbnail_url: orderItem?.artwork_thumbnail_url ?? null,
+      artwork_format:        orderItem?.artwork_format ?? 'PHYSICAL',
       unit_price:            orderItem?.unit_price != null ? Number(orderItem.unit_price) : 0,
       quantity:              orderItem?.quantity ?? 1,
+      created_at:            new Date(orderItem?.created_at ?? row['created_at']),
     },
+    cancelled_by: null,
+    cancelled_at: null,
     buyer:  toPartySummary(order?.buyer),
     seller: toPartySummary(orderItem?.seller),
   }
+}
+
+// Fills cancelled_by / cancelled_at from the timeline event that moved the
+// item into a cancelled state. The list embed cannot carry this because it is
+// derived from the latest matching event per item.
+async function attachCancellation(
+  entries: OrderItemPhysicalListEntry[],
+  context: string,
+): Promise<OrderItemPhysicalListEntry[]> {
+  const cancelled = entries.filter(e => e.delivery_status === 'CANCELLED')
+  if (!cancelled.length) return entries
+
+  const result = await (supabase() as any)
+    .from('order_timeline_events')
+    .select('order_item_physical_id, actor_role, occurred_at')
+    .in('order_item_physical_id', cancelled.map(e => e.id))
+    .in('timeline_status', ['ORDER_FAILED_TO_CONFIRM', 'DELIVERY_FAILED'])
+    .order('occurred_at', { ascending: false })
+
+  if (result.error) {
+    throw new Error(`[${context}] ${result.error.message}`)
+  }
+
+  const latest = new Map<string, { actor_role: OrderTimelineEvent['actor_role']; occurred_at: string }>()
+  for (const row of result.data ?? []) {
+    const id = row['order_item_physical_id'] as string
+    if (!latest.has(id)) latest.set(id, { actor_role: row['actor_role'], occurred_at: row['occurred_at'] })
+  }
+
+  return entries.map(entry => {
+    const hit = latest.get(entry.id)
+    return hit
+      ? { ...entry, cancelled_by: hit.actor_role, cancelled_at: new Date(hit.occurred_at) }
+      : entry
+  })
+}
+
+function escapeLikePattern(term: string): string {
+  return term.replace(/[\\%_]/g, '\\$&')
 }
 
 function toTimelineEvent(row: any): OrderTimelineEvent {
@@ -300,6 +346,23 @@ export const physicalOrderRepository = {
 
     assertNoError(physResult, 'physical.transitionStatus.refetch')
     return { physical: toPhysical(physResult.data), eventId }
+  },
+
+  // ── findById ────────────────────────────────────────────────────────────────
+  // Lookup by the order_item_physical primary key. This is the id the list
+  // endpoints return and the id every /api/physical-orders/:physicalId route,
+  // the transition RPC and the confirmation-timeout job operate on.
+
+  async findById(physicalId: string): Promise<OrderItemPhysical | undefined> {
+    const result = await (supabase() as any)
+      .from('order_item_physical')
+      .select('*')
+      .eq('id', physicalId)
+      .single()
+
+    if (result.error?.code === 'PGRST116') return undefined
+    assertNoError(result, 'physical.findById')
+    return toPhysical(result.data)
   },
 
   // ── findByOrderItemId ───────────────────────────────────────────────────────
@@ -874,47 +937,129 @@ export const physicalOrderRepository = {
     const limit = Math.min(50, Math.max(1, filters.limit ?? 20))
     const from  = (page - 1) * limit
     const to    = from + limit - 1
+    const empty = { data: [], total: 0, page, limit, total_pages: 0, has_next: false, has_prev: false }
 
     // Get order IDs belonging to this buyer
     const ordersResult = await (supabase() as any)
       .from('orders')
-      .select('id')
+      .select('id, order_number')
       .eq('buyer_id', buyerId)
 
     if (ordersResult.error) {
       throw new Error(`[physical.findByBuyer] ${ordersResult.error.message}`)
     }
 
-    const buyerOrderIds: string[] = (ordersResult.data ?? []).map((r: any) => r['id'] as string)
-    if (!buyerOrderIds.length) {
-      return { data: [], total: 0, page, limit, total_pages: 0, has_next: false, has_prev: false }
+    const buyerOrders: Array<{ id: string; order_number: string | null }> = ordersResult.data ?? []
+    if (!buyerOrders.length) return empty
+    const buyerOrderIds = buyerOrders.map(o => o.id)
+
+    // Search matches the artwork title or the order number. Both resolve to
+    // order_item ids, which are then intersected with the physical rows.
+    let searchItemIds: string[] | null = null
+    const term = filters.search?.trim()
+    if (term) {
+      const pattern     = `%${escapeLikePattern(term)}%`
+      const numberMatch = buyerOrders
+        .filter(o => o.order_number && o.order_number.toLowerCase().includes(term.toLowerCase()))
+        .map(o => o.id)
+
+      const [byTitle, byNumber] = await Promise.all([
+        (supabase() as any)
+          .from('order_items')
+          .select('id')
+          .in('order_id', buyerOrderIds)
+          .ilike('artwork_title', pattern),
+        numberMatch.length
+          ? (supabase() as any).from('order_items').select('id').in('order_id', numberMatch)
+          : Promise.resolve({ data: [], error: null }),
+      ])
+
+      if (byTitle.error)  throw new Error(`[physical.findByBuyer.search] ${byTitle.error.message}`)
+      if (byNumber.error) throw new Error(`[physical.findByBuyer.search] ${byNumber.error.message}`)
+
+      searchItemIds = [...new Set<string>([...(byTitle.data ?? []), ...(byNumber.data ?? [])].map((r: any) => r['id'] as string))]
+      if (!searchItemIds.length) return empty
     }
 
-    let query = (supabase() as any)
-      .from('order_item_physical')
-      .select(PHYSICAL_LIST_EMBED, { count: 'exact' })
-      .in('order_id', buyerOrderIds)
-
-    if (filters.delivery_status)    query = query.eq('delivery_status', filters.delivery_status)
-    if (filters.timeline_status)    query = query.eq('timeline_status', filters.timeline_status)
-    if (filters.timeline_status_in) query = query.in('timeline_status', filters.timeline_status_in)
-    if (filters.date_from)          query = query.gte('created_at', filters.date_from)
-    if (filters.date_to)            query = query.lte('created_at', filters.date_to)
-
-    query = query
-      .order('created_at', { ascending: filters.sort_order === 'asc' })
-      .range(from, to)
-
-    const result = await query
-    if (result.error) {
-      throw new Error(`[physical.findByBuyer] ${result.error.message}`)
+    const applyFilters = (query: any) => {
+      let q = query.in('order_id', buyerOrderIds)
+      if (searchItemIds)              q = q.in('order_item_id', searchItemIds)
+      if (filters.delivery_status)    q = q.eq('delivery_status', filters.delivery_status)
+      if (filters.timeline_status)    q = q.eq('timeline_status', filters.timeline_status)
+      if (filters.timeline_status_in) q = q.in('timeline_status', filters.timeline_status_in)
+      if (filters.date_from)          q = q.gte('created_at', filters.date_from)
+      if (filters.date_to)            q = q.lte('created_at', filters.date_to)
+      return q
     }
 
-    const total       = result.count ?? 0
+    const ascending = filters.sort_order === 'asc'
+    let rows: any[]
+    let total: number
+
+    if (filters.sort_by === 'value') {
+      // Value is unit_price * quantity + shipping_cost, which spans two tables
+      // and cannot be expressed as an ORDER BY through PostgREST. Rank the
+      // buyer's matching items on a minimal projection, then load only the
+      // requested page with the full embed.
+      const rankResult = await applyFilters(
+        (supabase() as any)
+          .from('order_item_physical')
+          .select(`
+            id,
+            created_at,
+            shipping_cost,
+            order_item:order_items!order_item_physical_order_item_id_fkey ( unit_price, quantity )
+          `),
+      )
+
+      if (rankResult.error) {
+        throw new Error(`[physical.findByBuyer.rank] ${rankResult.error.message}`)
+      }
+
+      const ranked = (rankResult.data ?? []).map((row: any) => {
+        const item = Array.isArray(row.order_item) ? row.order_item[0] : row.order_item
+        const value = Number(item?.unit_price ?? 0) * Number(item?.quantity ?? 1) + Number(row.shipping_cost ?? 0)
+        return { id: row.id as string, value, created_at: new Date(row.created_at).getTime() }
+      })
+      ranked.sort((a: any, b: any) => (ascending ? a.value - b.value : b.value - a.value) || b.created_at - a.created_at)
+
+      total = ranked.length
+      const pageIds = ranked.slice(from, to + 1).map((r: any) => r.id)
+      if (!pageIds.length) {
+        rows = []
+      } else {
+        const pageResult = await (supabase() as any)
+          .from('order_item_physical')
+          .select(PHYSICAL_LIST_EMBED)
+          .in('id', pageIds)
+
+        if (pageResult.error) {
+          throw new Error(`[physical.findByBuyer] ${pageResult.error.message}`)
+        }
+        const byId = new Map<string, any>((pageResult.data ?? []).map((r: any) => [r.id, r]))
+        rows = pageIds.map((id: string) => byId.get(id)).filter(Boolean)
+      }
+    } else {
+      const result = await applyFilters(
+        (supabase() as any)
+          .from('order_item_physical')
+          .select(PHYSICAL_LIST_EMBED, { count: 'exact' }),
+      )
+        .order('created_at', { ascending })
+        .range(from, to)
+
+      if (result.error) {
+        throw new Error(`[physical.findByBuyer] ${result.error.message}`)
+      }
+      rows  = result.data ?? []
+      total = result.count ?? 0
+    }
+
     const total_pages = Math.ceil(total / limit)
+    const data = await attachCancellation(rows.map(toPhysicalListEntry), 'physical.findByBuyer.cancellation')
 
     return {
-      data:        (result.data ?? []).map(toPhysicalListEntry),
+      data,
       total,
       page,
       limit,
@@ -922,6 +1067,21 @@ export const physicalOrderRepository = {
       has_next:    page < total_pages,
       has_prev:    page > 1,
     }
+  },
+
+  // ── getOrderItem ────────────────────────────────────────────────────────────
+  // The order_items snapshot (title, price, quantity, variant) for one item.
+
+  async getOrderItem(orderItemId: string): Promise<OrderItem | null> {
+    const result = await (supabase() as any)
+      .from('order_items')
+      .select('*')
+      .eq('id', orderItemId)
+      .single()
+
+    if (result.error?.code === 'PGRST116') return null
+    assertNoError(result, 'physical.getOrderItem')
+    return toOrderItem(result.data)
   },
 
   // ── getUserProfile ──────────────────────────────────────────────────────────

@@ -1,10 +1,17 @@
 import { sellerRepository } from '../repositories/seller.repository'
+import { sellerEmailVerificationService } from './seller-email-verification.service'
+import type { EmailCodeReceipt } from './seller-email-verification.service'
 import { auditRepository } from '@/modules/auth/repositories/audit.repository'
+import { notificationService } from '@/modules/messaging/services/notification.service'
+import { emailService } from '@/modules/email/email.service'
+import type { SellerApplicationEmailKind } from '@/modules/email/email.service'
 import {
   NotFoundError,
   ConflictError,
+  ForbiddenError,
   AppError,
 } from '@/common/errors'
+import type { UserRole } from '@/common/types'
 import {
   SELLER_REGISTRATION_TRANSITIONS,
 } from '@/common/types/seller.types'
@@ -33,27 +40,65 @@ function hasErrorCode(err: unknown): err is { code?: string } {
 
 // ── Submit / Resubmit ──────────────────────────────────────────────────────────
 
-export async function submitRegistration(
+// Staff accounts are never promoted/demoted through the seller flow:
+// transition_seller_registration() rewrites users.role to ARTIST / USER, which
+// would silently strip an admin or moderator of their role.
+async function assertCanApply(
   userId: string,
-  input: SubmitSellerRegistrationInput,
-  ctx: AuthContext,
-): Promise<SellerRegistration> {
+  role: UserRole,
+): Promise<SellerRegistration | undefined> {
+  if (role === 'ADMIN' || role === 'MODERATOR') {
+    throw new ForbiddenError('Staff accounts cannot register as sellers')
+  }
+
   const existing = await sellerRepository.findByUserId(userId)
   if (existing && existing.status !== 'REJECTED') {
     throw new ConflictError(
       `You already have a seller registration (status: ${existing.status})`,
     )
   }
+  return existing
+}
+
+export async function sendEmailVerificationCode(
+  userId: string,
+  role: UserRole,
+  email: string,
+): Promise<EmailCodeReceipt> {
+  await assertCanApply(userId, role)
+  return sellerEmailVerificationService.sendCode(userId, email)
+}
+
+export async function verifyEmailVerificationCode(
+  userId: string,
+  role: UserRole,
+  email: string,
+  code: string,
+): Promise<void> {
+  await assertCanApply(userId, role)
+  await sellerEmailVerificationService.verifyCode(userId, email, code)
+}
+
+export async function submitRegistration(
+  userId: string,
+  role: UserRole,
+  input: SubmitSellerRegistrationInput,
+  ctx: AuthContext,
+): Promise<SellerRegistration> {
+  const existing = await assertCanApply(userId, role)
+  await sellerEmailVerificationService.assertEmailVerified(userId, input.email)
 
   let registration: SellerRegistration
   try {
-    registration = await sellerRepository.submit(userId, input)
+    registration = await sellerRepository.submit(userId, input, new Date())
   } catch (err) {
     if (hasErrorCode(err) && err.code === '23505') {
       throw new ConflictError('You already have a seller registration')
     }
     throw err
   }
+
+  await sellerEmailVerificationService.clearProof(userId)
 
   auditRepository.log({
     userId,
@@ -191,7 +236,64 @@ async function changeStatus(
     },
   })
 
+  void notifyApplicant(updated, action, notes)
+
   return updated
+}
+
+const NOTIFICATION_COPY: Record<SellerApplicationEmailKind, string> = {
+  APPROVED: 'Your seller application was approved. You can now create and sell artwork.',
+  REJECTED: "Your seller application wasn't approved. You can update your details and apply again.",
+  SUSPENDED: 'Your seller account has been suspended and your marketplace listings are paused.',
+  REACTIVATED: 'Your seller account has been reactivated and your listings are live again.',
+}
+
+const KIND_BY_ACTION: Record<
+  'SELLER_REGISTRATION_APPROVED' | 'SELLER_REGISTRATION_REJECTED' |
+  'SELLER_REGISTRATION_SUSPENDED' | 'SELLER_REGISTRATION_REACTIVATED',
+  SellerApplicationEmailKind
+> = {
+  SELLER_REGISTRATION_APPROVED: 'APPROVED',
+  SELLER_REGISTRATION_REJECTED: 'REJECTED',
+  SELLER_REGISTRATION_SUSPENDED: 'SUSPENDED',
+  SELLER_REGISTRATION_REACTIVATED: 'REACTIVATED',
+}
+
+// The status change is already committed by the time this runs, so a failed
+// notification must never fail the admin's request — it is logged instead.
+async function notifyApplicant(
+  registration: SellerRegistration,
+  action: keyof typeof KIND_BY_ACTION,
+  notes: string | undefined,
+): Promise<void> {
+  const kind = KIND_BY_ACTION[action]
+
+  const results = await Promise.allSettled([
+    notificationService.create({
+      recipientId: registration.user_id,
+      actorId: null,
+      type: 'system',
+      entityId: registration.id,
+      entityType: 'seller_registration',
+      data: {
+        body: NOTIFICATION_COPY[kind],
+        status: registration.status,
+        ...(notes?.trim() && { notes: notes.trim() }),
+      },
+    }),
+    emailService.sendSellerApplicationUpdate({
+      to: registration.email,
+      name: registration.full_name,
+      kind,
+      notes: notes ?? null,
+    }),
+  ])
+
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error(`[sellerService] ${kind} applicant notification failed:`, result.reason)
+    }
+  }
 }
 
 // Initial review only — a registration that has already been through the

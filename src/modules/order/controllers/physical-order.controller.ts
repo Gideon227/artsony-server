@@ -32,6 +32,8 @@ function buildFilters(q: Record<string, unknown>): PhysicalOrderFilters {
     page:       q['page']  ? parseInt(q['page']  as string, 10) : 1,
     limit:      q['limit'] ? parseInt(q['limit'] as string, 10) : 20,
   }
+  if (q['sort_by'] === 'value') filters.sort_by = 'value'
+  if (typeof q['search'] === 'string' && q['search'].trim()) filters.search = q['search'].trim().slice(0, 100)
   if (q['delivery_status'] !== undefined) filters.delivery_status = q['delivery_status'] as PhysicalOrderFilters['delivery_status']
   if (q['timeline_status'] !== undefined) filters.timeline_status = q['timeline_status'] as PhysicalOrderFilters['timeline_status']
   if (q['refund_status']   !== undefined) filters.refund_status   = q['refund_status']   as PhysicalOrderFilters['refund_status']
@@ -149,6 +151,8 @@ export const validateListFilters = [
   query('delivery_status').optional().isIn(['LIVE', 'DELIVERED', 'CANCELLED']),
   query('refund_status').optional().isIn(['NONE', 'PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'PARTIAL']),
   query('sort_order').optional().isIn(['asc', 'desc']),
+  query('sort_by').optional().isIn(['date', 'value']),
+  query('search').optional().isString().trim().isLength({ max: 100 }),
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 50 }),
   query('date_from').optional().isISO8601(),

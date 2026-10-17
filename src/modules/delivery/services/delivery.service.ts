@@ -10,8 +10,7 @@ import { CloudinaryService } from '@/modules/upload/services/cloudinary.service'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const TOKEN_EXPIRY_DAYS = 7
-const MAX_DOWNLOADS = 3
+const MAX_DOWNLOADS = 1
 const SIGNED_URL_TTL_SEC = 300
 const RAW_TOKEN_BYTES = 48
 
@@ -93,7 +92,7 @@ export const deliveryService = {
   // the one-time raw token to have survived email delivery, so it remains
   // usable even if the delivery email bounced, landed in spam, or was
   // deleted. Both paths share the same underlying accounting (download
-  // count, expiry, max downloads) since they operate on the same
+  // count, max downloads) since they operate on the same
   // digital_delivery_tokens row.
 
   async getDownloadForOrderItem(
@@ -122,7 +121,7 @@ export const deliveryService = {
 
   // ── _redeem ────────────────────────────────────────────────────────────────
   // Internal: shared guard + delivery logic for both access paths above.
-  // Enforces expiry and the per-token download cap, resolves the artwork's
+  // Enforces the per-token download cap, resolves the artwork's
   // primary asset, records the download, and returns a short-lived signed
   // Cloudinary URL. Caller is responsible for the ownership check specific
   // to its access path (bearer token vs. session ownership) before calling
@@ -131,13 +130,9 @@ export const deliveryService = {
   async _redeem(
     tokenRecord: DigitalDeliveryToken,
   ): Promise<{ signed_url: string; filename: string; expires_at: Date }> {
-    if (new Date() > new Date(tokenRecord.expires_at)) {
-      throw new AppError('This download link has expired', 410, 'DOWNLOAD_TOKEN_EXPIRED')
-    }
-
     if (tokenRecord.download_count >= tokenRecord.max_downloads) {
       throw new AppError(
-        `Download limit reached (${tokenRecord.max_downloads} downloads maximum)`,
+        'This file has already been downloaded and cannot be downloaded again',
         429,
         'DOWNLOAD_LIMIT_REACHED',
       )
@@ -162,11 +157,18 @@ export const deliveryService = {
 
     // Time-limited Cloudinary download URL for the stored original. The raw
     // asset URL is never exposed to the buyer — only this signed variant.
-    // Built before the download is recorded so a failure here doesn't use up
-    // one of the buyer's downloads.
+    // Built before the download is claimed so a failure here doesn't use up
+    // the buyer's one download.
     const download  = CloudinaryService.buildDownloadUrl(primaryAsset['original_url'], SIGNED_URL_TTL_SEC)
 
-    await deliveryRepository.recordDownload(tokenRecord.id)
+    const claimed = await deliveryRepository.claimDownload(tokenRecord.id)
+    if (!claimed) {
+      throw new AppError(
+        'This file has already been downloaded and cannot be downloaded again',
+        429,
+        'DOWNLOAD_LIMIT_REACHED',
+      )
+    }
 
     const extension = download.format ?? primaryAsset['mime_type']?.split('/')[1] ?? 'jpg'
     const filename  = `${artworkResult.data['slug']}-artsony.${extension}`
@@ -192,15 +194,11 @@ export const deliveryService = {
     const rawToken  = crypto.randomBytes(RAW_TOKEN_BYTES).toString('hex')
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex')
 
-    const expiresAt = new Date()
-    expiresAt.setDate(expiresAt.getDate() + TOKEN_EXPIRY_DAYS)
-
     const record = await deliveryRepository.create({
       order_item_id: item.id,
       artwork_id:    item.artwork_id,
       buyer_id:      buyerId,
       token_hash:    tokenHash,
-      expires_at:    expiresAt,
       max_downloads: MAX_DOWNLOADS,
     })
 

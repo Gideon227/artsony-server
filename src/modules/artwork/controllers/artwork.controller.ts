@@ -277,9 +277,7 @@ export async function handleGetArtwork(
     const { id } = req.params as { id: string }
     const artwork = await artworkService.getArtworkById(id, req.auth?.sub)
 
-    // Only published artworks are viewed by an audience; a creator reopening
-    // their own draft is not a view.
-    if (artwork.status === 'PUBLISHED') {
+    if (artworkService.isCountableView(artwork, req.auth?.sub)) {
       const { ctx } = { ctx: extractRequestContext(req) }
       const identity = req.auth?.sub ?? ctx.ipAddress ?? 'anonymous'
       void artworkService.trackView(id, identity).catch((err) => {
@@ -309,9 +307,13 @@ export async function handleTrackView(
   try {
     assertValid(req)
     const { id } = req.params as { id: string }
-    const ctx = extractRequestContext(req)
-    const identity = req.auth?.sub ?? ctx.ipAddress ?? 'anonymous'
-    await artworkService.trackView(id, identity)
+    const artwork = await artworkService.getArtworkById(id, req.auth?.sub)
+
+    if (artworkService.isCountableView(artwork, req.auth?.sub)) {
+      const ctx = extractRequestContext(req)
+      const identity = req.auth?.sub ?? ctx.ipAddress ?? 'anonymous'
+      await artworkService.trackView(id, identity)
+    }
     res.status(204).end()
   } catch (err) {
     next(err)
@@ -342,11 +344,13 @@ export async function handleGetArtworkBySlug(
     const { slug } = req.params as { slug: string }
     const artwork = await artworkService.getArtworkBySlug(slug, req.auth?.sub)
 
-    const { ctx } = { ctx: extractRequestContext(req) }
-    const identity = req.auth?.sub ?? ctx.ipAddress ?? 'anonymous'
-    void artworkService.trackView(artwork.id, identity).catch((err) => {
-      console.error(`[Analytics Error] Failed to track view for artwork ${artwork.id}:`, err)
-    })
+    if (artworkService.isCountableView(artwork, req.auth?.sub)) {
+      const { ctx } = { ctx: extractRequestContext(req) }
+      const identity = req.auth?.sub ?? ctx.ipAddress ?? 'anonymous'
+      void artworkService.trackView(artwork.id, identity).catch((err) => {
+        console.error(`[Analytics Error] Failed to track view for artwork ${artwork.id}:`, err)
+      })
+    }
 
     res.json({ success: true, data: artwork })
   } catch (err) {

@@ -3,16 +3,16 @@ import type { DigitalDeliveryToken, DigitalDeliveryTokenWithArtwork } from '@/co
 
 function toToken(row: any): DigitalDeliveryToken {
   return {
-    id:                 row['id'],
-    order_item_id:      row['order_item_id'],
-    artwork_id:         row['artwork_id'],
-    buyer_id:           row['buyer_id'],
-    token_hash:         row['token_hash'],
-    expires_at:         new Date(row['expires_at']),
-    download_count:     row['download_count'],
-    max_downloads:      row['max_downloads'],
+    id: row['id'],
+    order_item_id: row['order_item_id'],
+    artwork_id: row['artwork_id'],
+    buyer_id: row['buyer_id'],
+    token_hash: row['token_hash'],
+    expires_at: row['expires_at'] ? new Date(row['expires_at']) : null,
+    download_count: row['download_count'],
+    max_downloads: row['max_downloads'],
     last_downloaded_at: row['last_downloaded_at'] ? new Date(row['last_downloaded_at']) : null,
-    created_at:         new Date(row['created_at']),
+    created_at: new Date(row['created_at']),
   }
 }
 
@@ -23,8 +23,8 @@ function toTokenWithArtwork(row: any): DigitalDeliveryTokenWithArtwork {
 
   return {
     ...toToken(row),
-    artwork_title:          (artwork['title'] as string | undefined) ?? 'Untitled artwork',
-    artwork_slug:           (artwork['slug'] as string | undefined) ?? '',
+    artwork_title: (artwork['title'] as string | undefined) ?? 'Untitled artwork',
+    artwork_slug: (artwork['slug'] as string | undefined) ?? '',
     artwork_thumbnail_url:  (primaryAsset?.['thumbnail_url'] as string | undefined)
       ?? (primaryAsset?.['original_url'] as string | undefined)
       ?? null,
@@ -35,20 +35,18 @@ export const deliveryRepository = {
 
   async create(input: {
     order_item_id: string
-    artwork_id:    string
-    buyer_id:      string
-    token_hash:    string
-    expires_at:    Date
+    artwork_id: string
+    buyer_id: string
+    token_hash: string
     max_downloads: number
   }): Promise<DigitalDeliveryToken> {
     const result = await (supabase() as any)
       .from('digital_delivery_tokens')
       .insert({
         order_item_id: input.order_item_id,
-        artwork_id:    input.artwork_id,
-        buyer_id:      input.buyer_id,
-        token_hash:    input.token_hash,
-        expires_at:    input.expires_at.toISOString(),
+        artwork_id: input.artwork_id,
+        buyer_id: input.buyer_id,
+        token_hash: input.token_hash,
         max_downloads: input.max_downloads,
       })
       .select('*')
@@ -90,34 +88,39 @@ export const deliveryRepository = {
       .eq('buyer_id', buyerId)
       .order('created_at', { ascending: false })
 
-    if (result.error) return []
+    assertNoError(result, 'delivery.findByBuyer')
     return (result.data ?? []).map(toTokenWithArtwork)
   },
 
-  // Atomically increments download_count and updates last_downloaded_at.
-  // Returns the updated token.
-  async recordDownload(tokenId: string): Promise<DigitalDeliveryToken> {
-    // Fetch first so we can compute the new count — Supabase JS client
-    // doesn't support arithmetic updates natively.
+  // Claims a download slot with a compare-and-swap on download_count, so two
+  // concurrent requests can never both consume the same slot. Returns null when
+  // the token is exhausted or another request claimed the slot first.
+  async claimDownload(tokenId: string): Promise<DigitalDeliveryToken | null> {
     const current = await (supabase() as any)
       .from('digital_delivery_tokens')
-      .select('download_count')
+      .select('download_count, max_downloads')
       .eq('id', tokenId)
       .single()
 
-    assertNoError(current, 'delivery.recordDownload.fetch')
+    assertNoError(current, 'delivery.claimDownload.fetch')
+
+    const count = current.data['download_count'] as number
+    if (count >= (current.data['max_downloads'] as number)) return null
 
     const result = await (supabase() as any)
       .from('digital_delivery_tokens')
       .update({
-        download_count:     (current.data['download_count'] as number) + 1,
+        download_count:     count + 1,
         last_downloaded_at: new Date().toISOString(),
       })
       .eq('id', tokenId)
+      .eq('download_count', count)
       .select('*')
-      .single()
+      .maybeSingle()
 
-    assertNoError(result, 'delivery.recordDownload')
-    return toToken(result.data)
+    if (result.error) {
+      throw new Error(`[delivery.claimDownload] ${result.error.message}`)
+    }
+    return result.data ? toToken(result.data) : null
   },
 }

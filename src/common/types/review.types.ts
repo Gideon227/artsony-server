@@ -15,10 +15,11 @@ export type OrderReview = {
 
 // Denormalised view used by review listing endpoints (artist dashboard,
 // artwork page) — includes just enough buyer/artwork context to render
-// without a second round trip. buyer_name is sourced from users.email
-// (the codebase currently has no display_name/username on users).
+// without a second round trip. buyer_name is the buyer's public display name
+// (profiles.display_name, else a non-email username) — never their email.
 export type OrderReviewWithContext = OrderReview & {
   buyer_name: string
+  buyer_avatar_url: string | null
   artwork_title: string
 }
 
@@ -34,6 +35,8 @@ export type ReviewFilters = {
   seller_id?: string
   artwork_id?: string
   search?: string
+  date_from?: string
+  date_to?: string
   page?: number
   limit?: number
   sort?: 'newest' | 'oldest' | 'highest' | 'lowest'

@@ -32,6 +32,22 @@ export type ReviewEligibility = {
   already_reviewed: boolean
 }
 
+const ANONYMOUS_BUYER_NAME = 'Artsony buyer'
+
+// users.username falls back to the signup email when none is supplied, so a
+// username containing '@' is treated as private and never shown.
+function publicBuyerName(profile: { display_name?: string | null } | null, username: string | null): string {
+  const displayName = profile?.display_name?.trim()
+  if (displayName) return displayName
+  if (username && !username.includes('@')) return username
+  return ANONYMOUS_BUYER_NAME
+}
+
+function firstProfile(value: any): { display_name?: string | null; avatar_url?: string | null } | null {
+  if (Array.isArray(value)) return value[0] ?? null
+  return value ?? null
+}
+
 export const reviewRepository = {
   // ── GetEligibility ─────────────────────────────────────────────────────────
   // Everything the service needs to decide whether the caller may review
@@ -124,10 +140,15 @@ export const reviewRepository = {
 
     let query = (supabase() as any)
       .from('order_reviews')
-      .select('*, order_items!inner(artwork_title), users!buyer_id(email)', { count: 'exact' })
+      .select(
+        '*, order_items!inner(artwork_title), buyer:users!buyer_id(username, profile:profiles(display_name, avatar_url))',
+        { count: 'exact' },
+      )
 
     if (filters.seller_id)  query = query.eq('seller_id', filters.seller_id)
     if (filters.artwork_id) query = query.eq('artwork_id', filters.artwork_id)
+    if (filters.date_from)  query = query.gte('created_at', filters.date_from)
+    if (filters.date_to)    query = query.lte('created_at', filters.date_to)
 
     const ascending = filters.sort === 'oldest' || filters.sort === 'lowest'
     const orderCol  = (filters.sort === 'highest' || filters.sort === 'lowest') ? 'rating' : 'created_at'
@@ -138,20 +159,28 @@ export const reviewRepository = {
       throw new Error(`[Supabase:review.list] ${result.error.message}`)
     }
 
-    let rows = (result.data ?? []) as any[]
+    const rows = ((result.data ?? []) as any[]).map((row) => {
+      const profile = firstProfile(row['buyer']?.['profile'])
+      return {
+        row,
+        buyer_name:       publicBuyerName(profile, row['buyer']?.['username'] ?? null),
+        buyer_avatar_url: profile?.avatar_url ?? null,
+      }
+    })
 
-    if (filters.search) {
-      const needle = filters.search.toLowerCase()
-      rows = rows.filter((row) =>
-        (row['comment'] ?? '').toLowerCase().includes(needle) ||
-        (row['users']?.['email'] ?? '').toLowerCase().includes(needle) ||
-        (row['order_items']?.['artwork_title'] ?? '').toLowerCase().includes(needle)
-      )
-    }
+    const needle = filters.search?.toLowerCase()
+    const visible = needle
+      ? rows.filter(({ row, buyer_name }) =>
+          (row['comment'] ?? '').toLowerCase().includes(needle) ||
+          buyer_name.toLowerCase().includes(needle) ||
+          (row['order_items']?.['artwork_title'] ?? '').toLowerCase().includes(needle)
+        )
+      : rows
 
-    const data: OrderReviewWithContext[] = rows.map((row) => ({
+    const data: OrderReviewWithContext[] = visible.map(({ row, buyer_name, buyer_avatar_url }) => ({
       ...toReview(row),
-      buyer_name:    row['users']?.['email'] ?? 'Unknown buyer',
+      buyer_name,
+      buyer_avatar_url,
       artwork_title: row['order_items']?.['artwork_title'] ?? 'Unknown artwork',
     }))
 
@@ -166,6 +195,31 @@ export const reviewRepository = {
       total_pages,
       has_next: page < total_pages,
       has_prev: page > 1,
+    }
+  },
+
+  // ── GetSellerAverageRatingBetween ──────────────────────────────────────────
+  // Average star rating for reviews created in [start, end) — used to compare
+  // two equally long windows for the Artsony Score's satisfaction trend.
+
+  async getSellerAverageRatingBetween(
+    sellerId: string,
+    start: Date,
+    end: Date,
+  ): Promise<{ average_rating: number | null; review_count: number }> {
+    const result = await (supabase() as any)
+      .from('order_reviews')
+      .select('rating')
+      .eq('seller_id', sellerId)
+      .gte('created_at', start.toISOString())
+      .lt('created_at', end.toISOString())
+
+    assertNoError(result, 'review.getSellerAverageRatingBetween')
+    const ratings = ((result.data ?? []) as Array<{ rating: number }>).map((r) => r.rating)
+
+    return {
+      average_rating: ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : null,
+      review_count:   ratings.length,
     }
   },
 

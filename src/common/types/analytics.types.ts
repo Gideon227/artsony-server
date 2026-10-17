@@ -2,9 +2,11 @@ import type { WalletLedgerCategory } from './commerce.types'
 
 // ── Periods ────────────────────────────────────────────────────────────────────
 
-export type AnalyticsPeriod = 'day' | 'week' | '2weeks' | 'month' | '6months' | 'year'
+export type AnalyticsPeriod = 'day' | 'week' | '2weeks' | 'month' | '6months' | 'year' | 'all'
 
-export const PERIOD_DAYS: Record<AnalyticsPeriod, number> = {
+// 'all' has no fixed length (it runs from ALL_TIME_START to today) and no
+// comparable previous window, so it is deliberately absent here.
+export const PERIOD_DAYS: Record<Exclude<AnalyticsPeriod, 'all'>, number> = {
   day: 1,
   week: 7,
   '2weeks': 14,
@@ -22,6 +24,16 @@ export type MetricTrend = {
   previous: number
   change_percent: number
   direction: TrendDirection
+}
+
+// ── Daily series (per-day earnings / sales / views / likes) ─────────────────────
+
+export type DailySeriesPoint = {
+  day: string           // YYYY-MM-DD (UTC)
+  amount: number
+  sales_count: number
+  views: number
+  likes: number
 }
 
 // ── Sales feed (filters/sort/search shared by the /analytics/sales endpoint) ───
@@ -85,7 +97,7 @@ export type AnalyticsOverview = {
 
 // ── Top artworks ────────────────────────────────────────────────────────────────
 
-export type TopArtworkMetric = 'earnings' | 'sales' | 'engagement'
+export type TopArtworkMetric = 'earnings' | 'sales' | 'views' | 'engagement'
 
 export type TopArtwork = {
   artwork_id: string
@@ -94,11 +106,16 @@ export type TopArtwork = {
   earnings: MetricTrend
   sales: MetricTrend
   engagement: MetricTrend   // views + likes, combined
+  views_trend: MetricTrend
   views: number
   likes: number
 }
 
 // ── Artsony Score ────────────────────────────────────────────────────────────────
+
+// Percentage change of a sub-score's underlying signal versus the previous,
+// equally long window. null when either window has too little data to compare.
+export type ScoreTrend = Pick<MetricTrend, 'change_percent' | 'direction'> | null
 
 export type ArtsonyScoreBreakdown = {
   score: number                      // 0–100 composite
@@ -107,6 +124,7 @@ export type ArtsonyScoreBreakdown = {
     average_rating: number | null    // 1–5, null if no reviews yet
     review_count: number
     weight: number
+    trend: ScoreTrend                // last 30 days vs the 30 before
   }
   engagement: {
     score: number                    // 0–100
@@ -114,6 +132,7 @@ export type ArtsonyScoreBreakdown = {
     total_likes: number
     engagement_rate: number          // likes / views, 0 if no views
     weight: number
+    trend: ScoreTrend                // like-through rate, 90 days vs the 90 before
   }
   order_reliability: {
     score: number                    // 0–100

@@ -23,8 +23,17 @@ function requireAuth(req: Request): { sub: string; role: string } {
 
 // ── Validation chains ────────────────────────────────────────────────────────────
 
+function hasAtMostTwoDecimals(value: unknown): boolean {
+  const n = Number(value)
+  return Number.isFinite(n) && Math.abs(n * 100 - Math.round(n * 100)) < 1e-8
+}
+
 export const requestWithdrawalValidation = [
-  body('amount').isFloat({ gt: 0 }).withMessage('amount must be a positive number'),
+  body('amount')
+    .isFloat({ gt: 0 }).withMessage('amount must be a positive number')
+    .bail()
+    .custom(hasAtMostTwoDecimals).withMessage('amount must have at most 2 decimal places'),
+  body('idempotency_key').optional().isUUID().withMessage('idempotency_key must be a UUID'),
   body('destination_type').isIn(['WALLET_ADDRESS', 'BANK_ACCOUNT']),
   body('destination_details').isObject(),
 ]

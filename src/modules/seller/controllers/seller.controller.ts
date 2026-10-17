@@ -37,6 +37,8 @@ const registrationFieldValidation = [
   body('phone_number')
     .isString().trim().isLength({ min: 5, max: 30 })
     .withMessage('phone_number is required (5–30 characters)'),
+  body('city')
+    .optional().isString().trim().isLength({ min: 1, max: 100 }),
   body('address')
     .isString().trim().isLength({ min: 1, max: 300 })
     .withMessage('address is required (max 300 characters)'),
@@ -44,7 +46,7 @@ const registrationFieldValidation = [
     .isString().trim().isLength({ min: 1, max: 120 })
     .withMessage('state is required'),
   body('country')
-    .isString().trim().isLength({ min: 2, max: 2 })
+    .isString().trim().isISO31661Alpha2()
     .withMessage('country must be a 2-letter ISO code'),
   body('postal_code')
     .optional().isString().trim().isLength({ max: 30 }),
@@ -52,10 +54,19 @@ const registrationFieldValidation = [
 
 export const submitRegistrationValidation = registrationFieldValidation
 
+export const sendEmailCodeValidation = [
+  body('email').isEmail().normalizeEmail().trim().withMessage('a valid email is required'),
+]
+
+export const verifyEmailCodeValidation = [
+  body('email').isEmail().normalizeEmail().trim().withMessage('a valid email is required'),
+  body('code').isString().trim().matches(/^\d{4}$/).withMessage('code must be 4 digits'),
+]
+
 export const updateRegistrationValidation = [
   body('full_name').optional().isString().trim().isLength({ min: 1, max: 150 }),
   body('username').optional().isString().trim().isLength({ min: 3, max: 30 }),
-  body('email').optional().isEmail().normalizeEmail().trim(),
+  body('city').optional().isString().trim().isLength({ min: 1, max: 100 }),
   body('phone_number').optional().isString().trim().isLength({ min: 5, max: 30 }),
   body('address').optional().isString().trim().isLength({ min: 1, max: 300 }),
   body('state').optional().isString().trim().isLength({ min: 1, max: 120 }),
@@ -107,13 +118,50 @@ export async function handleSubmitRegistration(
       address: String(payload['address']).trim(),
       state: String(payload['state']).trim(),
       country: String(payload['country']).trim().toUpperCase(),
+      ...(payload['city'] !== undefined ? { city: String(payload['city']).trim() } : {}),
       ...(payload['postal_code'] !== undefined ? { postal_code: String(payload['postal_code']).trim() } : {}),
     }
 
     const ctx = extractRequestContext(req)
-    const registration = await sellerService.submitRegistration(req.auth.sub, input, ctx)
+    const registration = await sellerService.submitRegistration(req.auth.sub, req.auth.role, input, ctx)
 
     res.status(201).json({ success: true, data: registration })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export async function handleSendEmailCode(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    assertValid(req)
+    if (!req.auth) throw new UnauthorizedError()
+
+    const { email } = req.body as { email: string }
+    const receipt = await sellerService.sendEmailVerificationCode(req.auth.sub, req.auth.role, email)
+
+    res.json({ success: true, data: receipt })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export async function handleVerifyEmailCode(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    assertValid(req)
+    if (!req.auth) throw new UnauthorizedError()
+
+    const { email, code } = req.body as { email: string; code: string }
+    await sellerService.verifyEmailVerificationCode(req.auth.sub, req.auth.role, email, code)
+
+    res.json({ success: true, data: { verified: true } })
   } catch (err) {
     next(err)
   }
@@ -146,10 +194,10 @@ export async function handleUpdateMyRegistration(
     const input: UpdateSellerRegistrationInput = {
       ...(payload['full_name'] !== undefined ? { full_name: String(payload['full_name']).trim() } : {}),
       ...(payload['username'] !== undefined ? { username: String(payload['username']).trim() } : {}),
-      ...(payload['email'] !== undefined ? { email: String(payload['email']).trim() } : {}),
       ...(payload['phone_number'] !== undefined ? { phone_number: String(payload['phone_number']).trim() } : {}),
       ...(payload['address'] !== undefined ? { address: String(payload['address']).trim() } : {}),
       ...(payload['state'] !== undefined ? { state: String(payload['state']).trim() } : {}),
+      ...(payload['city'] !== undefined ? { city: String(payload['city']).trim() } : {}),
       ...(payload['country'] !== undefined ? { country: String(payload['country']).trim().toUpperCase() } : {}),
       ...(payload['postal_code'] !== undefined ? { postal_code: String(payload['postal_code']).trim() } : {}),
     }

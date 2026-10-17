@@ -228,7 +228,7 @@ export type DigitalDeliveryToken = {
   artwork_id: string
   buyer_id: string
   token_hash: string
-  expires_at: Date
+  expires_at: Date | null
   download_count: number
   max_downloads: number
   last_downloaded_at: Date | null
@@ -444,9 +444,13 @@ export type OrderItemPhysicalListEntry = OrderItemPhysical & {
     artwork_title: string
     artwork_slug: string
     artwork_thumbnail_url: string | null
+    artwork_format: ArtworkFormat
     unit_price: number
     quantity: number
+    created_at: Date
   }
+  cancelled_by: OrderTimelineEvent['actor_role'] | null
+  cancelled_at: Date | null
   buyer: OrderPartySummary | null
   seller: OrderPartySummary | null
 }
@@ -581,6 +585,8 @@ export type PhysicalOrderFilters = {
   page?: number | undefined
   limit?: number | undefined
   sort_order?: 'asc' | 'desc' | undefined
+  sort_by?: 'date' | 'value' | undefined
+  search?: string | undefined
   date_from?: string | undefined
   date_to?: string | undefined
   order_number?: string | undefined

@@ -28,6 +28,10 @@ export const RedisTTL = {
   resetToken: 60 * 15,           // 15 min
   emailVerify: 60 * 60 * 24,      // 24 hours
   oauthState: 60 * 10,           // 10 min
+  sellerEmailCode: 60 * 10,        // 10 min — emailed seller-registration code
+  sellerEmailProof: 60 * 30,       // 30 min — proof the code was entered, consumed on submit
+  sellerEmailCooldown: 60,         // 60 s — minimum gap between code emails
+  sellerEmailDaily: 60 * 60 * 24,  // 24 h — daily cap window for code emails
   loginAttempts: 60 * 30,           // 30 min lockout window
   rtBlacklist: 60 * 60 * 24 * 30, // match refresh token lifetime
   rtGraceWindow: 10,                 // 10s — legitimate concurrent refresh reuse (multi-tab) vs. real replay
@@ -87,6 +91,11 @@ export const RedisKeys = {
   resetToken: (userId: string) => `auth:reset:${userId}`,
   emailVerify: (userId: string) => `auth:verify:${userId}`,
   oauthState: (state: string) => `auth:oauth:state:${state}`,
+  sellerEmailCode: (userId: string) => `seller:email-code:${userId}`,
+  sellerEmailAttempts: (userId: string) => `seller:email-attempts:${userId}`,
+  sellerEmailProof: (userId: string) => `seller:email-proof:${userId}`,
+  sellerEmailCooldown: (userId: string) => `seller:email-cooldown:${userId}`,
+  sellerEmailDaily: (userId: string) => `seller:email-daily:${userId}`,
 
   // ── Artwork ────────────────────────────────────────────────────────────────
   artworkById: (id: string) => `artwork:single:${id}`,
