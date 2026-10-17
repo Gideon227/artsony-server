@@ -3,8 +3,8 @@ import type {
   SellerSaleLine,
   SellerSalesCounts,
   SellerSalesFilters,
-} from '../../../../../common/types/seller-sales.types'
-import { sellerSalesRepository } from '../../../../../modules/order/repositories/seller-sales.repository'
+} from '@/common/types/seller-sales.types'
+import { sellerSalesRepository } from '@/modules/order/repositories/seller-sales.repository'
 
 export const sellerSalesService = {
   list(sellerId: string, filters: SellerSalesFilters): Promise<PaginatedResult<SellerSaleLine>> {

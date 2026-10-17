@@ -1,11 +1,11 @@
-import { supabase } from '../../../config/database'
-import type { PaginatedResult } from '../../../common/types/commerce.types'
+import { supabase } from '@/config/database'
+import type { PaginatedResult } from '@/common/types/commerce.types'
 import {
   SELLER_STATUSES,
   type SellerSaleLine,
   type SellerSalesCounts,
   type SellerSalesFilters,
-} from '../../../common/types/seller-sales.types'
+} from '@/common/types/seller-sales.types'
 import {
   SELLER_SALES_DEFAULT_LIMIT,
   escapeLike,
