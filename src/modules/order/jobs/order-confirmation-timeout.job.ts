@@ -1,7 +1,7 @@
 import Bull from 'bull'
 import { config } from '@/config'
 import { physicalOrderRepository } from '../repositories/physical-order.repository'
-import { BUYER_ARTIST_CANCELLABLE_STATES } from '@/common/types/commerce.types'
+import { BUYER_ARTIST_CANCELLABLE_STATES, ORDER_CONFIRMATION_WINDOW_MS } from '@/common/types/commerce.types'
 import type { TimelineStatus } from '@/common/types/commerce.types'
 
 // ── Queue ─────────────────────────────────────────────────────────────────────
@@ -17,8 +17,6 @@ export const orderConfirmationQueue = new Bull<{ physicalId: string; orderId: st
     },
   },
 )
-
-const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000
 
 // ── Enqueue ───────────────────────────────────────────────────────────────────
 // Called by the physical order service when an item enters AWAITING_CONFIRMATION.
@@ -39,7 +37,7 @@ export async function scheduleConfirmationTimeout(
     { physicalId, orderId },
     {
       jobId,
-      delay: FOURTEEN_DAYS_MS,
+      delay: ORDER_CONFIRMATION_WINDOW_MS,
     },
   )
 }

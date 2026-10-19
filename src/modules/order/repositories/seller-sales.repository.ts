@@ -13,23 +13,26 @@ import {
   searchTokens,
 } from '../utils/seller-sales-query'
 
-const VIEW = 'seller_sales_view'
+export const VIEW = 'seller_sales_view'
 
-const COLUMNS = [
+export const COLUMNS = [
   'order_item_id', 'order_id', 'physical_id', 'order_code', 'legacy_code',
   'artwork_id', 'artwork_title', 'artwork_thumbnail_url', 'artwork_format',
-  'quantity', 'unit_price', 'line_total', 'currency', 'buyer_name',
+  'quantity', 'unit_price', 'line_total', 'currency', 'buyer_id', 'buyer_name', 'buyer_avatar_url',
   'seller_status', 'timeline_status', 'delivery_status', 'purchased_at',
+  'courier_name', 'estimated_delivery_date', 'delivered_at', 'cancelled_at', 'cancelled_by',
+  'refund_status', 'refund_amount',
 ].join(',')
 
 const RANGE_NOT_SATISFIABLE = 'PGRST103'
 
-function toLine(row: Record<string, any>): SellerSaleLine {
+export function toLine(row: Record<string, any>): SellerSaleLine {
   return {
     ...(row as SellerSaleLine),
     quantity: Number(row['quantity']),
     unit_price: Number(row['unit_price']),
     line_total: Number(row['line_total']),
+    refund_amount: row['refund_amount'] === null || row['refund_amount'] === undefined ? null : Number(row['refund_amount']),
   }
 }
 
@@ -79,6 +82,7 @@ export const sellerSalesRepository = {
     const page = filters.page ?? 1
     const limit = filters.limit ?? SELLER_SALES_DEFAULT_LIMIT
     const ascending = filters.sort_order === 'asc'
+    const sortColumn = filters.sort_by === 'value' ? 'line_total' : 'purchased_at'
     const { from, to } = pageRange(page, limit)
 
     const result = await applyFilters(
@@ -86,7 +90,8 @@ export const sellerSalesRepository = {
       sellerId,
       filters,
     )
-      .order('purchased_at', { ascending })
+      .order(sortColumn, { ascending })
+      .order('purchased_at', { ascending: false })
       .order('order_item_id', { ascending })
       .range(from, to)
 

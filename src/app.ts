@@ -15,6 +15,7 @@ import { cartRouter } from './modules/cart/routes/cart.routes'
 import { orderRouter } from './modules/order/routes/order.routes'
 import { deliveryRouter } from './modules/delivery/routes/delivery.routes'
 import { uploadRouter } from './modules/upload/routes/upload.routes'
+import { activationUploadRouter } from './modules/order/routes/activation-upload.routes'
 import { messagingRouter } from './modules/messaging/routes/messaging.router'
 import { notificationRouter } from './modules/messaging/routes/notification.router'
 import { physicalOrderRouter } from './modules/order/routes/physical-order.routes'
@@ -101,6 +102,7 @@ export function createApp() {
   app.use('/api/orders', orderRouter)
   app.use('/api/delivery', deliveryRouter)
   app.use('/api/upload', uploadRouter)
+  app.use('/api/activation-uploads', activationUploadRouter)
   app.use('/api/conversations', messagingRouter)
   app.use('/api/notifications', notificationRouter)
   app.use('/api/physical-orders', physicalOrderRouter)

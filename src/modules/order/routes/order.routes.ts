@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth } from '@/middleware/auth.middleware'
+import { requireAuth, authorize } from '@/middleware/auth.middleware'
 import { idempotencyGuard } from '@/middleware/idempotency.middleware'
 import {
   handleCheckout,
@@ -15,6 +15,24 @@ import {
   updateStatusValidation,
   orderListValidation,
 } from '../controllers/order.controller'
+import {
+  handleActivationSessionState,
+  handleCreateActivationSession,
+  handleSaveShipping,
+  handleShippingLabel,
+  validateOrderItem,
+  validateSaveShipping,
+  validateSessionState,
+} from '../controllers/order-activation.controller'
+import {
+  handleGetSellerSale,
+  handleListSellerSales,
+  handleSellerSalesCounts,
+} from '../controllers/seller-sales.controller'
+import {
+  sellerSaleDetailValidation,
+  sellerSalesListValidation,
+} from '../validators/seller-sales.validation'
 
 const router = Router()
 
@@ -27,6 +45,24 @@ router.post('/checkout', checkoutValidation, handleCheckout)
 // ── Seller sales list ─────────────────────────────────────────────────────────
 // Placed before /:id so Express does not match 'sales' as an id param.
 router.get('/sales', orderListValidation, handleGetSellerOrders)
+
+// ── Seller sales lines (Order Management) ─────────────────────────────────────
+// One row per order item, scoped to the authenticated seller. Registered before
+// /:id for the same reason as /sales above.
+router.get('/sales/lines', authorize(['ARTIST', 'ADMIN']), sellerSalesListValidation, handleListSellerSales)
+router.get('/sales/lines/counts', authorize(['ARTIST', 'ADMIN']), handleSellerSalesCounts)
+router.get('/sales/lines/:orderItemId', authorize(['ARTIST', 'ADMIN']), sellerSaleDetailValidation, handleGetSellerSale)
+
+// Activation: shipping choices, QR upload session and the shipping label.
+router.patch('/sales/lines/:orderItemId/shipping', authorize(['ARTIST']), validateSaveShipping, handleSaveShipping)
+router.post('/sales/lines/:orderItemId/activation/session', authorize(['ARTIST']), validateOrderItem, handleCreateActivationSession)
+router.get(
+  '/sales/lines/:orderItemId/activation/session/:sessionId',
+  authorize(['ARTIST']),
+  validateSessionState,
+  handleActivationSessionState,
+)
+router.get('/sales/lines/:orderItemId/label', authorize(['ARTIST']), validateOrderItem, handleShippingLabel)
 
 // ── Buyer order list ──────────────────────────────────────────────────────────
 router.get('/', orderListValidation, handleGetBuyerOrders)

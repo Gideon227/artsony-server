@@ -1,10 +1,12 @@
 import {
   SELLER_SALES_FORMATS,
+  SELLER_SALES_SORT_FIELDS,
   SELLER_STATUSES,
   type SellerSalesFilters,
   type SellerSalesFormat,
+  type SellerSalesSortField,
   type SellerStatus,
-} from '../../../common/types/seller-sales.types'
+} from '@/common/types/seller-sales.types'
 
 export const SELLER_SALES_DEFAULT_LIMIT = 20
 export const SELLER_SALES_MAX_LIMIT = 50
@@ -50,6 +52,7 @@ export function parseSellerSalesFilters(query: Record<string, unknown>): SellerS
   const dateFrom = asString(query['date_from'])
   const dateTo = asString(query['date_to'])
   const search = asString(query['q'])?.trim()
+  const sortBy = asString(query['sort_by'])
   const sortOrder = asString(query['sort_order'])
   const page = asNumber(query['page'])
   const limit = asNumber(query['limit'])
@@ -62,6 +65,9 @@ export function parseSellerSalesFilters(query: Record<string, unknown>): SellerS
     ...(dateFrom && { date_from: new Date(dateFrom).toISOString() }),
     ...(dateTo && { date_to: new Date(dateTo).toISOString() }),
     ...(search && { q: search }),
+    sort_by: (SELLER_SALES_SORT_FIELDS as readonly string[]).includes(sortBy ?? '')
+      ? (sortBy as SellerSalesSortField)
+      : 'date',
     sort_order: sortOrder === 'asc' ? 'asc' : 'desc',
     page: page ?? 1,
     limit: Math.min(limit ?? SELLER_SALES_DEFAULT_LIMIT, SELLER_SALES_MAX_LIMIT),

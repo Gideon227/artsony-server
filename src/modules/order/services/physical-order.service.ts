@@ -33,6 +33,9 @@ import {
   ConflictError,
 } from '@/common/errors'
 import { orderRepository } from '../repositories/order.repository'
+import { orderActivationRepository } from '../repositories/order-activation.repository'
+import { REQUIRED_PACKAGING_PHOTOS } from '@/common/types/order-activation.types'
+import { generateTrackingNumber } from '../utils/activation'
 import { config } from '@/config'
 
 // ── Redis distributed lock ────────────────────────────────────────────────────
@@ -118,6 +121,16 @@ async function getOrderBuyerIdDirect(orderId: string): Promise<string | null> {
     .eq('id', orderId)
     .single()
   return (result.data?.['buyer_id'] as string | null) ?? null
+}
+
+async function assignTrackingNumber(physicalId: string): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidate = generateTrackingNumber()
+    if (await orderActivationRepository.trackingIdExists(candidate)) continue
+    await physicalOrderRepository.updateCourierInfo(physicalId, { tracking_id: candidate })
+    return
+  }
+  throw new Error('[physicalOrderService] could not generate a unique tracking number')
 }
 
 async function getOrderItemSellerIdDirect(orderItemId: string): Promise<string | null> {
@@ -226,6 +239,11 @@ export const physicalOrderService = {
     if (input.actorRole === 'ARTIST') {
       const sellerId = await getOrderItemSellerIdDirect(physical.order_item_id)
       if (sellerId !== input.actorId) throw new ForbiddenError('You are not the seller of this item')
+
+      const photos = await orderActivationRepository.countPackagingProofs(physical.id)
+      if (photos < REQUIRED_PACKAGING_PHOTOS) {
+        throw new ConflictError('Upload your packaging photos to activate this order')
+      }
     }
 
     assertValidTransition(physical.timeline_status, 'AWAITING_CONFIRMATION_ACTIVE')
@@ -251,6 +269,8 @@ export const physicalOrderService = {
       notes:      'Awaiting admin to assign courier and activate pickup',
       metadata:   {},
     })
+
+    if (!physical.tracking_id) await assignTrackingNumber(physical.id)
 
     const orderNumber = await physicalOrderRepository.getOrderNumber(physical.order_id)
     const buyerId     = await getOrderBuyerIdDirect(physical.order_id)

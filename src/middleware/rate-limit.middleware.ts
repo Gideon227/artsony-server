@@ -128,6 +128,22 @@ export const uploadSignRateLimit = rateLimit({
   store: new RedisStore('rl:upload-sign:', UPLOAD_SIGN_WINDOW_MS) as never,
 })
 
+// ─── Activation photo upload (public, token-authenticated): per IP ────────────
+// 3 photos need 3 signatures plus a status read and the final call, so 60 per
+// 15 minutes leaves room for retries without helping token guessing.
+
+const ACTIVATION_UPLOAD_WINDOW_MS = 15 * 60 * 1000
+
+export const activationUploadRateLimit = rateLimit({
+  windowMs: ACTIVATION_UPLOAD_WINDOW_MS,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip ?? 'unknown',
+  handler,
+  store: new RedisStore('rl:activation-upload:', ACTIVATION_UPLOAD_WINDOW_MS) as never,
+})
+
 // ─── Seller email code: per user, 15 requests per 15 minutes ──────────────────
 // Covers both sending and verifying; sending is additionally limited by a
 // cooldown and a daily cap, verifying by a per-code attempt limit.

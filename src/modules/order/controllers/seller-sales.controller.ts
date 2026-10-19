@@ -28,3 +28,15 @@ export async function handleSellerSalesCounts(req: Request, res: Response, next:
     next(err)
   }
 }
+
+// GET /api/orders/sales/lines/:orderItemId
+export async function handleGetSellerSale(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    assertValidRequest(req)
+    if (!req.auth) throw new UnauthorizedError()
+    const detail = await sellerSalesService.detail(req.auth.sub, String(req.params['orderItemId']))
+    res.json({ success: true, data: detail })
+  } catch (err) {
+    next(err)
+  }
+}

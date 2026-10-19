@@ -539,6 +539,9 @@ export type RefundRequest = {
 // ── Service fee constant ──────────────────────────────────────────────────────
 export const PLATFORM_SERVICE_FEE_RATE = 0.14  // 14% of item cost (not shipping)
 
+// How long a seller has to confirm a physical order before it auto-cancels.
+export const ORDER_CONFIRMATION_WINDOW_MS = 14 * 24 * 60 * 60 * 1000
+
 // ── Physical pipeline state machine ──────────────────────────────────────────
 // Maps each state to the set of states it can transition into.
 // Admins only — artists/buyers have narrower permission checks in the service.

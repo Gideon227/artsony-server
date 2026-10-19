@@ -1,7 +1,7 @@
 import type { Request } from 'express'
-import { query, validationResult } from 'express-validator'
-import { ValidationError } from '../../../common/errors'
-import { SELLER_SALES_FORMATS, SELLER_STATUSES } from '../../../common/types/seller-sales.types'
+import { param, query, validationResult } from 'express-validator'
+import { ValidationError } from '@/common/errors'
+import { SELLER_SALES_FORMATS, SELLER_SALES_SORT_FIELDS, SELLER_STATUSES } from '@/common/types/seller-sales.types'
 import { SELLER_SALES_MAX_LIMIT } from '../utils/seller-sales-query'
 
 const single = (value: unknown): boolean => typeof value === 'string'
@@ -37,7 +37,12 @@ export const sellerSalesListValidation = [
   optionalSingle('limit')
     .isInt({ min: 1, max: SELLER_SALES_MAX_LIMIT })
     .withMessage(`limit must be between 1 and ${SELLER_SALES_MAX_LIMIT}`),
+  optionalSingle('sort_by').isIn([...SELLER_SALES_SORT_FIELDS]).withMessage('sort_by must be date or value'),
   optionalSingle('sort_order').isIn(['asc', 'desc']).withMessage('sort_order must be asc or desc'),
+]
+
+export const sellerSaleDetailValidation = [
+  param('orderItemId').isUUID().withMessage('orderItemId must be a valid UUID'),
 ]
 
 export function assertValidRequest(req: Request): void {
