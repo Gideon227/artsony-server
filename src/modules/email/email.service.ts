@@ -1,7 +1,6 @@
 import nodemailer from 'nodemailer'
-import Bull from 'bull'
-import Redis from 'ioredis'
 import { config } from '@/config'
+import { createQueue } from '@/modules/queue/queue.factory'
 
 // ─── Transport ────────────────────────────────────────────────────────────────
 
@@ -16,51 +15,8 @@ const transporter = nodemailer.createTransport({
 })
 
 // ─── Queue (Bull backed by Redis) ─────────────────────────────────────────────
-//
-// Bull opens its own dedicated Redis connections (client/subscriber/bclient)
-// separate from the app's main ioredis client. If those connections can't be
-// established (connection cap reached, network issue, misconfigured host),
-// Bull retries silently in the background by default — and since queue.add()
-// awaits that connection, a slow/broken Redis previously meant this call, and
-// therefore the whole HTTP request that triggered it (e.g. forgot-password),
-// hung forever with no error surfaced anywhere.
-//
-// Fix: bound the connection attempt itself, log failures loudly, and race
-// every add() against a hard timeout so this can never hang indefinitely.
 
-const BULL_CONNECT_TIMEOUT_MS = 5000
 const QUEUE_ADD_TIMEOUT_MS = 5000
-
-function createBullRedisClient(type: 'client' | 'subscriber' | 'bclient'): Redis {
-  const opts = {
-    connectTimeout: BULL_CONNECT_TIMEOUT_MS,
-    retryStrategy: (times: number) => (times > 5 ? null : Math.min(times * 200, 2000)),
-    ...(type !== 'client' && {
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-    }),
-  }
-  console.log(`[EmailQueue:${type}] options:`, {
-    maxRetriesPerRequest: opts.maxRetriesPerRequest,
-    enableReadyCheck: opts.enableReadyCheck,
-  })
-  const client = new Redis(config.redis.url, opts)
-  client.on('error', (err) => {
-    console.error(`[EmailQueue:${type}] connection error:`, err.message)
-  })
-  return client
-}
-
-// function createBullRedisClient(type: 'client' | 'subscriber' | 'bclient'): Redis {
-//   const client = new Redis(config.redis.url, {
-//     connectTimeout: BULL_CONNECT_TIMEOUT_MS,
-//     retryStrategy: (times) => (times > 5 ? null : Math.min(times * 200, 2000)),
-//   })
-//   client.on('error', (err) => {
-//     console.error(`[EmailQueue:${type}] connection error:`, err.message)
-//   })
-//   return client
-// }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>
@@ -81,8 +37,7 @@ type EmailJob = {
   text: string
 }
 
-const emailQueue = new Bull<EmailJob>(config.queue.emailQueue, {
-  createClient: (type) => createBullRedisClient(type),
+export const emailQueue = createQueue<EmailJob>(config.queue.emailQueue, {
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: 'exponential', delay: 5000 },
@@ -99,10 +54,6 @@ emailQueue.process(async (job) => {
     html: job.data.html,
     text: job.data.text,
   })
-})
-
-emailQueue.on('error', (err) => {
-  console.error('[EmailQueue] queue-level error:', err.message)
 })
 
 emailQueue.on('failed', (job, err) => {

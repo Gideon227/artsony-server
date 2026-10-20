@@ -1,5 +1,4 @@
-import Bull from 'bull'
-import { config } from '@/config'
+import { createQueue } from '@/modules/queue/queue.factory'
 import { paymentService } from '../services/payment.service'
 import { orderService } from '@/modules/order/services/order.service'
 import { supabase } from '@/config/database'
@@ -15,24 +14,28 @@ type ExpireJobData = Record<string, never>
 
 // ── Queues ────────────────────────────────────────────────────────────────────
 
-const verifyQueue = new Bull<VerifyJobData>('artsony:queue:payment:verify', {
-  redis: config.redis.url,
-  defaultJobOptions: {
-    attempts:         1,         // payment service owns retry logic explicitly
-    removeOnComplete: true,
-    removeOnFail:     false,
-  },
-})
+const verifyQueue = createQueue<VerifyJobData>(
+  'artsony:queue:payment:verify',
+  {
+    defaultJobOptions: {
+      attempts: 1,
+      removeOnComplete: true,
+      removeOnFail: false,
+    },
+  }
+)
 
-const expireQueue = new Bull<ExpireJobData>('artsony:queue:payment:expire', {
-  redis: config.redis.url,
-  defaultJobOptions: {
-    attempts:         3,
-    backoff:          { type: 'exponential', delay: 5_000 },
-    removeOnComplete: true,
-    removeOnFail:     false,
-  },
-})
+const expireQueue = createQueue<ExpireJobData>(
+  'artsony:queue:payment:expire',
+  {
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5_000 },
+      removeOnComplete: true,
+      removeOnFail: false,
+    },
+  }
+)
 
 // ── Processors ────────────────────────────────────────────────────────────────
 

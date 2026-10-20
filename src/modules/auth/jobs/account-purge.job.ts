@@ -1,5 +1,5 @@
-import Bull from 'bull'
 import { config } from '@/config'
+import { createQueue } from '@/modules/queue/queue.factory'
 import { userRepository } from '../repositories/user.repository'
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -27,30 +27,34 @@ const GRACE_MS = config.queue.accountDeletionGraceDays * 24 * 60 * 60 * 1000
 
 // ── Queues ────────────────────────────────────────────────────────────────────
 
-const purgeQueue = new Bull<PurgeJobData>(config.queue.deletionQueue, {
-  redis: config.redis.url,
-  defaultJobOptions: {
-    attempts:         3,
-    backoff:          { type: 'exponential', delay: 60_000 },
-    removeOnComplete: true,
-    removeOnFail:     false,
-  },
-})
+const purgeQueue = createQueue<PurgeJobData>(
+  config.queue.deletionQueue,
+  {
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 60_000 },
+      removeOnComplete: true,
+      removeOnFail: false,
+    },
+  }
+)
 
-const sweepQueue = new Bull<SweepJobData>(`${config.queue.deletionQueue}:sweep`, {
-  redis: config.redis.url,
-  defaultJobOptions: {
-    attempts:         1,
-    removeOnComplete: true,
-    removeOnFail:     false,
-  },
-})
+const sweepQueue = createQueue<SweepJobData>(
+  `${config.queue.deletionQueue}:sweep`,
+  {
+    defaultJobOptions: {
+      attempts: 1,
+      removeOnComplete: true,
+      removeOnFail: false,
+    },
+  }
+)
 
 // ── Purge a single account ───────────────────────────────────────────────────
 
 async function purgeIfStillEligible(userId: string): Promise<void> {
   const user = await userRepository.findByIdIncludingDeleted(userId)
-  if (!user) return                          // already hard-deleted some other way
+  if (!user) return 
   if (user.status !== 'DELETED') return      // restored by support before purge ran
   if (user.deleted_at === null) return       // defensive — shouldn't happen if status is DELETED
   if (user.purged_at) return                 // already purged (sweep caught it first)

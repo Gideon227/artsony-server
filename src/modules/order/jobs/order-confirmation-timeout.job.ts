@@ -1,19 +1,17 @@
-import Bull from 'bull'
-import { config } from '@/config'
+import { createQueue } from '@/modules/queue/queue.factory'
 import { physicalOrderRepository } from '../repositories/physical-order.repository'
 import { BUYER_ARTIST_CANCELLABLE_STATES, ORDER_CONFIRMATION_WINDOW_MS } from '@/common/types/commerce.types'
 import type { TimelineStatus } from '@/common/types/commerce.types'
 
 // ── Queue ─────────────────────────────────────────────────────────────────────
 
-export const orderConfirmationQueue = new Bull<{ physicalId: string; orderId: string }>(
+export const orderConfirmationQueue = createQueue<{ physicalId: string; orderId: string }>(
   'artsony:order:confirmation-timeout',
   {
-    redis: config.redis.url,
     defaultJobOptions: {
-      attempts:       1,       // no retry — if item is already confirmed, job is a no-op
+      attempts: 1,
       removeOnComplete: true,
-      removeOnFail:   false,
+      removeOnFail: false,
     },
   },
 )

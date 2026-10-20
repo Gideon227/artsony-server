@@ -3,6 +3,7 @@ import { createApp } from './app'
 import { createWsServer } from './modules/ws/ws.server'
 import { closePubSub } from './modules/redis/redis.pubsub'
 import { getRedis } from './modules/redis/redis.client'
+import { closeQueues } from './modules/queue/queue.factory'
 import { startExpireScheduler } from './modules/payment/jobs/payment.job'
 import { startAccountPurgeSweep } from './modules/auth/jobs/account-purge.job'
 import './modules/order/jobs/order-confirmation-timeout.job'
@@ -63,6 +64,7 @@ async function start(): Promise<void> {
       try {
         // Close Redis pub/sub subscriber cleanly so in-flight messages drain
         await closePubSub()
+        await closeQueues()
 
         // Disconnect the shared Redis client
         getRedis().disconnect()
