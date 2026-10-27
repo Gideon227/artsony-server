@@ -3,6 +3,8 @@ import { blockRepository } from '@/modules/block/repositories/block.repository'
 import { isInteractionAllowed } from '@/common/utils/privacy.util'
 import { ValidationError, NotFoundError } from '@/common/errors'
 import type { User, UserWithProfile, PrivacySettings } from '@/common/types'
+import { conversationRepository } from '@/modules/messaging/repositories/conversation.repository'
+import { userReportRepository } from '../repositories/user-report.repository'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -190,6 +192,34 @@ export type InteractionPermissions = {
   can_message: boolean
   can_comment: boolean
   can_purchase: boolean
+}
+
+export const USER_REPORT_REASONS = ['SPAM','HARASSMENT','SCAM','IMPERSONATION','INAPPROPRIATE','OTHER'] as const
+export type UserReportReason = (typeof USER_REPORT_REASONS)[number]
+
+export async function reportUser(input: {
+  reporterId: string
+  reportedUserId: string
+  reason: UserReportReason
+  notes?: string | undefined
+  conversationId?: string | undefined
+}): Promise<void> {
+  if (input.reporterId === input.reportedUserId) {
+    throw new ValidationError('Validation failed', { id: 'You cannot report yourself' })
+  }
+  const target = await userRepository.findById(input.reportedUserId)
+  if (!target) throw new NotFoundError('User')
+
+  // Only keep the chat reference if both people are really in it
+  let conversationId: string | null = null
+  if (input.conversationId) {
+    const ids = await conversationRepository.getParticipantIds(input.conversationId)
+    if (ids.includes(input.reporterId) && ids.includes(input.reportedUserId)) conversationId = input.conversationId
+  }
+  await userReportRepository.create({
+    reporterId: input.reporterId, reportedUserId: input.reportedUserId,
+    reason: input.reason, notes: input.notes?.trim() || null, conversationId,
+  })
 }
 
 export async function getInteractionPermissions(

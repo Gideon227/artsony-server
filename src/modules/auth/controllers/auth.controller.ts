@@ -154,17 +154,27 @@ export async function handleRefresh(
 ): Promise<void> {
   try {
     const rawToken = getRefreshToken(req)
+    // if (!rawToken) {
+    //   res.status(401).json({ success: false, code: 'NO_REFRESH_TOKEN' })
+    //   return
+    // }
     if (!rawToken) {
+      console.warn('[auth/refresh] NO_REFRESH_TOKEN', {
+        hasCookieHeader: Boolean(req.headers.cookie),
+        origin: req.headers.origin,
+        ua: req.headers['user-agent'],
+      })
       res.status(401).json({ success: false, code: 'NO_REFRESH_TOKEN' })
       return
     }
-
+        
     const ctx = extractRequestContext(req)
     const tokens = await authService.refreshTokens({ rawRefreshToken: rawToken, ctx })
 
     setRefreshCookie(res, tokens.refreshToken)
     res.json({ success: true, data: { accessToken: tokens.accessToken } })
   } catch (err) {
+    console.warn('[auth/refresh] failed', { code: (err as { code?: string }).code, message: (err as Error).message })
     next(err)
   }
 }

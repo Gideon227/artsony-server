@@ -24,6 +24,10 @@ export const updateMoodboardValidation = [
   body('title').isString().trim().isLength({ min: 1, max: 100 }).withMessage('Title must be 1-100 characters'),
 ]
 
+export const listUserMoodboardsValidation = [
+  param('userId').isUUID().withMessage('Invalid user ID'),
+]
+
 export const artworkJunctionValidation = [
   param('id').isUUID().withMessage('Invalid moodboard ID'),
   body('artwork_id').isUUID().withMessage('Invalid artwork ID'),
@@ -53,6 +57,21 @@ export async function handleListMoodboards(req: Request, res: Response, next: Ne
 
     const userId = req.auth.sub as string
     const moodboards = await moodboardService.listMoodboards(userId)
+
+    res.json({ success: true, data: moodboards })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export async function handleListUserMoodboards(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    assertValid(req)
+    if (!req.auth) throw new UnauthorizedError()
+
+    const { userId } = req.params as { userId: string }
+    const requesterId = req.auth.sub as string
+    const moodboards = await moodboardService.listUserMoodboards(userId, requesterId)
 
     res.json({ success: true, data: moodboards })
   } catch (err) {

@@ -6,6 +6,12 @@ import type { Moodboard, MoodboardSummary } from '@/common/types/moodboard.types
 // deleted or unviewable, so a few candidates are read per board.
 const COVER_CANDIDATES = 5
 
+function isViewableBy(artwork: any, viewerId: string): boolean {
+  if (!artwork || artwork.deleted_at) return false
+  if (artwork.visibility === 'PUBLIC' && artwork.status === 'PUBLISHED') return true
+  return artwork.creator_id === viewerId || (artwork.collaborator_ids ?? []).includes(viewerId)
+}
+
 export const moodboardRepository = {
   async create(userId: string, title: string): Promise<Moodboard> {
     // Cast to any to bypass the 'never' generic constraint locally
@@ -55,6 +61,50 @@ export const moodboardRepository = {
         updated_at: new Date(row.updated_at),
       }
     })
+  },
+
+  // Someone else's boards. Unlike findByUserId, the artwork count and cover
+  // only reflect artworks `viewerId` is allowed to see, so a visitor never
+  // sees a count that includes private / draft / deleted pieces. One query
+  // for the boards and one for all their items, regardless of board count.
+  async findVisibleByUserId(ownerId: string, viewerId: string): Promise<MoodboardSummary[]> {
+    const db = supabase() as any
+
+    const { data: boards, error } = await db
+      .from('moodboards')
+      .select('id, title, created_at, updated_at')
+      .eq('user_id', ownerId)
+      .order('updated_at', { ascending: false })
+
+    if (error) throw error
+    if (!boards?.length) return []
+
+    const { data: items, error: itemsError } = await db
+      .from('moodboard_items')
+      .select('moodboard_id, added_at, artworks (assets, deleted_at, visibility, status, creator_id, collaborator_ids)')
+      .in('moodboard_id', boards.map((b: any) => b.id))
+      .order('added_at', { ascending: true })
+
+    if (itemsError) throw itemsError
+
+    const stats = new Map<string, { count: number; cover: string | null }>()
+    for (const item of (items ?? []) as any[]) {
+      if (!isViewableBy(item.artworks, viewerId)) continue
+
+      const entry = stats.get(item.moodboard_id) ?? { count: 0, cover: null }
+      entry.count += 1
+      if (!entry.cover) entry.cover = pickThumbnail(item.artworks.assets) ?? null
+      stats.set(item.moodboard_id, entry)
+    }
+
+    return boards.map((row: any) => ({
+      id: row.id,
+      title: row.title,
+      artwork_count: stats.get(row.id)?.count ?? 0,
+      cover_thumbnail_url: stats.get(row.id)?.cover ?? null,
+      created_at: new Date(row.created_at),
+      updated_at: new Date(row.updated_at),
+    }))
   },
 
   // First image of the earliest-added artwork the viewer can still see.

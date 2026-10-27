@@ -34,7 +34,7 @@ export const RedisTTL = {
   sellerEmailDaily: 60 * 60 * 24,  // 24 h — daily cap window for code emails
   loginAttempts: 60 * 30,           // 30 min lockout window
   rtBlacklist: 60 * 60 * 24 * 30, // match refresh token lifetime
-  rtGraceWindow: 10,                 // 10s — legitimate concurrent refresh reuse (multi-tab) vs. real replay
+  rtGraceWindow: 60,                 // 60s — legitimate concurrent refresh reuse (multi-tab) vs. real replay
   rtClaim: 30,                       // 30s — in-flight refresh rotation; expires on its own if the winner dies mid-rotation
 
   // Artwork

@@ -78,6 +78,11 @@ function toArtwork(row: any, isSaved?: boolean, isLiked?: boolean): Artwork {
   }
 }
 
+// Search-page color options that don't map to a single variant label.
+const COLOR_FILTER_WORDS: Record<string, string[]> = {
+  monochrome: ['black', 'white', 'grey', 'gray', 'monochrome', 'b&w'],
+}
+
 const CREATOR_EMBED = `
   *,
   creator:users!artworks_creator_id_fkey (
@@ -585,9 +590,22 @@ export const artworkRepository = {
         : locationCreatorIds
     }
 
+    // Size and color both live inside the variants JSONB, so both resolve to
+    // an id list up front. When both are set an artwork must match both.
     let sizeArtworkIds: string[] | undefined
     if (filters.size_label?.trim()) {
       sizeArtworkIds = await this.getArtworkIdsBySize(filters.size_label.trim())
+      if (sizeArtworkIds.length === 0) {
+        return emptyResult(page, limit)
+      }
+    }
+
+    if (filters.color?.trim()) {
+      const colorArtworkIds = await this.getArtworkIdsByColor(filters.color.trim())
+      const colorSet = new Set(colorArtworkIds)
+      sizeArtworkIds = sizeArtworkIds
+        ? sizeArtworkIds.filter((id) => colorSet.has(id))
+        : colorArtworkIds
       if (sizeArtworkIds.length === 0) {
         return emptyResult(page, limit)
       }
@@ -784,6 +802,22 @@ export const artworkRepository = {
 
     if (result.error) {
       throw new Error(`[Supabase:artwork.getArtworkIdsBySize] ${result.error.message}`)
+    }
+    return (result.data ?? []).map((r: any) => r['id'])
+  },
+
+  // Color filter. Sellers type COLOR variant labels freely ("Red", "Crimson red"),
+  // so match case-insensitively on a substring. "monochrome" has no single label,
+  // so it matches the usual black/white/grey wordings.
+  async getArtworkIdsByColor(color: string): Promise<string[]> {
+    const words = COLOR_FILTER_WORDS[color.toLowerCase()] ?? [color]
+    // Escape LIKE wildcards so user input can't act as a pattern.
+    const patterns = words.map((w) => `%${w.replace(/[\\%_]/g, '\\$&')}%`)
+
+    const result = await (supabase() as any).rpc('get_artwork_ids_by_color', { p_patterns: patterns })
+
+    if (result.error) {
+      throw new Error(`[Supabase:artwork.getArtworkIdsByColor] ${result.error.message}`)
     }
     return (result.data ?? []).map((r: any) => r['id'])
   },

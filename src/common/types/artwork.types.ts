@@ -162,6 +162,7 @@ export type ArtworkFilters = {
   state?: string
   city?: string
   size_label?: string 
+  color?: string
   page?: number
   limit?: number
   sort_by?: 'created_at' | 'like_count' | 'view_count' | 'price'

@@ -16,6 +16,8 @@ import {
   updatePrivacySettingsValidation,
   getInteractionPermissionsValidation,
   getPublicProfileValidation,
+  reportUserValidation,
+  handleReportUser,
 } from './controllers/user.controller'
 
 const router = Router()
@@ -45,6 +47,8 @@ router.patch('/me/privacy', updatePrivacySettingsValidation, handleUpdatePrivacy
 // GET /api/users/:userId/permissions — can the requesting user message/
 // comment on/purchase from :userId, given :userId's privacy settings
 router.get('/:userId/permissions', getInteractionPermissionsValidation, handleGetInteractionPermissions)
+
+router.post('/:id/report', reportUserValidation, handleReportUser)
 
 // GET /api/users/:id — another user's public profile (for PublicProfilePage).
 // Must stay registered after /me, /search, /by-ids, /me/privacy above —

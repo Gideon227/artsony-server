@@ -218,6 +218,7 @@ export const listArtworksValidation = [
   query('state').optional().isString().trim().isLength({ max: 100 }),
   query('city').optional().isString().trim().isLength({ max: 100 }),
   query('size_label').optional().isString().trim().isLength({ max: 50 }),
+  query('color').optional().isString().trim().isLength({ max: 50 }),
 ]
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -548,6 +549,7 @@ export async function handleListArtworks(
       ...(q['state'] ? { state: q['state'] as string } : {}),
       ...(q['city'] ? { city: q['city'] as string } : {}),
       ...(q['size_label'] ? { size_label: q['size_label'] as string } : {}),
+      ...(q['color'] ? { color: q['color'] as string } : {}),
     } as ArtworkFilters
 
     const result = await artworkService.listArtworks(

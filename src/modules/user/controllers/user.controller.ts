@@ -231,6 +231,24 @@ export async function handleGetInteractionPermissions(
   }
 }
 
+export const reportUserValidation = [
+  param('id').isUUID().withMessage('id must be a valid UUID'),
+  body('reason').isIn([...userService.USER_REPORT_REASONS]).withMessage('Invalid report reason'),
+  body('notes').optional().isString().trim().isLength({ max: 1000 }),
+  body('conversation_id').optional().isUUID().withMessage('conversation_id must be a valid UUID'),
+]
+
+export async function handleReportUser(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    assertValid(req)
+    if (!req.auth) { res.status(401).json({ success: false, code: 'UNAUTHORIZED' }); return }
+    const { id } = req.params as { id: string }
+    const { reason, notes, conversation_id } = req.body as { reason: userService.UserReportReason; notes?: string; conversation_id?: string }
+    await userService.reportUser({ reporterId: req.auth.sub, reportedUserId: id, reason, notes, conversationId: conversation_id })
+    res.status(201).json({ success: true, message: 'Report submitted' })
+  } catch (err) { next(err) }
+}
+
 // ─── GET /api/users/me ────────────────────────────────────────────────────────
 
 export async function handleGetMe(

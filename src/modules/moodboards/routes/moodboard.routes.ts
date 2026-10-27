@@ -9,9 +9,11 @@ import {
   handleAddArtwork,
   handleRemoveArtwork,
   handleGetMoodboard,
+  handleListUserMoodboards,
   createMoodboardValidation,
   updateMoodboardValidation,
-  artworkJunctionValidation
+  artworkJunctionValidation,
+  listUserMoodboardsValidation,
 } from '../controllers/moodboard.controller'
 
 const router = Router()
@@ -22,6 +24,10 @@ router.use(apiRateLimit)
 // Must be registered before GET /:id or Express will try to parse "mine" (or
 // whatever) as a moodboard id.
 router.get('/', requireAuth, handleListMoodboards)
+
+// ── Authenticated: list another user's boards (profile → Moodboard tab) ───────
+// Registered before GET /:id for the same reason as above.
+router.get('/user/:userId', requireAuth, listUserMoodboardsValidation, handleListUserMoodboards)
 
 // ── Public / Optional Auth ────────────────────────────────────────────────────
 router.get('/:id', optionalAuth, handleGetMoodboard)
