@@ -12,6 +12,7 @@ import type {
   FeaturedArtwork,
   LicenseType,
 } from '@/common/types/artwork.types'
+import { expandCategoryFilter } from '@/common/constants/artwork-categories'
 
 // Display label + canonical CC URL for each stored license_type — kept here
 // rather than in the DB so copy changes don't need a migration. Labels match
@@ -626,13 +627,13 @@ export const artworkRepository = {
     if (filters.min_price !== undefined) query = query.gte('price', filters.min_price)
     if (filters.max_price !== undefined) query = query.lte('price', filters.max_price)
 
+
     if (filters.categories?.length) {
-      // .overlaps (not .contains) — a multi-select category filter means
-      // "has ANY of these categories", not "has ALL of these categories".
-      // .contains would require every selected category to be present on
-      // the same artwork simultaneously, which is far too restrictive for
-      // what a category filter chip UI actually means.
-      query = query.overlaps('categories', filters.categories)
+      // Clients send ids ("watercolor") but uploads store labels ("Water color");
+      // expandCategoryFilter matches either form.
+      const categoryMatches = expandCategoryFilter(filters.categories)
+      if (categoryMatches.length === 0) return emptyResult(page, limit)
+      query = query.overlaps('categories', categoryMatches)
     }
 
     if (filters.search?.trim()) {

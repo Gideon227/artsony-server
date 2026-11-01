@@ -370,6 +370,8 @@ export const getFeedValidation = [
   query('size_label').optional().isString().trim().isLength({ max: 50 }),
   query('listing_type').optional().isIn(['MARKETPLACE', 'PORTFOLIO']),
   query('artwork_format').optional().isIn(['DIGITAL', 'PHYSICAL']),
+  query('min_price').optional().isFloat({ min: 0 }),
+  query('max_price').optional().isFloat({ min: 0 }),
 ]
 
 export async function handleGetFeed(
@@ -395,6 +397,9 @@ export async function handleGetFeed(
       ...(q['size_label'] ? { size_label: q['size_label'] as string } : {}),
       ...(q['listing_type'] ? { listing_type: q['listing_type'] } : {}),
       ...(q['artwork_format'] ? { artwork_format: q['artwork_format'] } : {}),
+      ...(q['min_price'] !== undefined && q['min_price'] !== '' ? { min_price: Number(q['min_price']) } : {}),
+      ...(q['max_price'] !== undefined && q['max_price'] !== '' ? { max_price: Number(q['max_price']) } : {}),
+    
     } as ArtworkFilters
 
     const result = await artworkService.getFeed(mode, filters, req.auth?.sub)
