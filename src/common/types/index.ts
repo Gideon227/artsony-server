@@ -130,7 +130,7 @@ export type OAuthProfile = {
   providerId:  string
   email:       string
   displayName: string
-  avatarUrl:   string | null
+  avatar_url:   string | null
 }
 
 export type RequestWithUser = {

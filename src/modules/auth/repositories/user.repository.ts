@@ -1,5 +1,6 @@
 import { supabase, assertNoError } from '@/config/database'
 import type { User, UserWithProfile, UserProfileFields, PrivacySettings, AuthProvider, UserRole, UserStatus } from '@/common/types'
+import type { StoredLocation, LocationWritePlan } from '@/modules/geo/location-policy'
 
 /**
  * Maps database rows (with ISO strings) to domain User objects (with Date objects).
@@ -130,6 +131,56 @@ export const userRepository = {
 
     if (result.error) throw new Error(`[UserRepo:searchByUsername] ${result.error.message}`)
     return (result.data ?? []).map(toUser)
+  },
+
+  // Public-safe user search for pickers (e.g. tagging upload collaborators).
+  // Matches username OR display name, only ACTIVE/non-deleted accounts, and
+  // returns the same thin projection as findPublicProfilesByIds — never the
+  // email or any account-security fields. `excludeUserId` keeps the caller
+  // out of their own results.
+  async searchPublicProfiles(
+    query: string,
+    limit = 8,
+    excludeUserId?: string,
+  ): Promise<Array<{
+    id: string
+    username: string
+    role: string
+    profile: { display_name: string | null; avatar_url: string | null } | null
+  }>> {
+    // Escape LIKE wildcards so "_" / "%" in the query are matched literally.
+    const pattern = `%${query.replace(/[\\%_]/g, '\\$&')}%`
+
+    const [byUsername, byDisplayName] = await Promise.all([
+      (supabase() as any)
+        .from('users')
+        .select('id')
+        .ilike('username', pattern)
+        .eq('status', 'ACTIVE')
+        .is('deleted_at', null)
+        .limit(limit + 1),
+      (supabase() as any)
+        .from('profiles')
+        .select('user_id')
+        .ilike('display_name', pattern)
+        .limit(limit + 1),
+    ])
+
+    if (byUsername.error) throw new Error(`[UserRepo:searchPublicProfiles] ${byUsername.error.message}`)
+    if (byDisplayName.error) throw new Error(`[UserRepo:searchPublicProfiles] ${byDisplayName.error.message}`)
+
+    const ids = Array.from(
+      new Set<string>([
+        ...(byUsername.data ?? []).map((r: any) => r.id as string),
+        ...(byDisplayName.data ?? []).map((r: any) => r.user_id as string),
+      ]),
+    )
+      .filter((id) => id !== excludeUserId)
+      .slice(0, limit)
+
+    // Inactive/deleted accounts matched via display name are dropped here.
+    const profiles = await userRepository.findPublicProfilesByIds(ids)
+    return profiles.sort((a, b) => a.username.localeCompare(b.username))
   },
 
   // Thin, public-safe projection for batch lookups (e.g. resolving upload
@@ -494,6 +545,58 @@ export const userRepository = {
 
     if (result.error) {
       throw new Error(`[Supabase:upsertProfile] ${result.error.message}`)
+    }
+  },
+
+    // ── Auto-detected location ───────────────────────────────────────────────
+
+  // Current public location + who set it. null = no profiles row yet.
+  async getLocationState(userId: string): Promise<StoredLocation | null> {
+    const result = await (supabase() as any)
+      .from('profiles')
+      .select('country, state, city, location_source')
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (result.error) {
+      throw new Error(`[Supabase:getLocationState] ${result.error.message}`)
+    }
+    if (!result.data) return null
+
+    return {
+      country: result.data['country'] ?? null,
+      state: result.data['state'] ?? null,
+      city: result.data['city'] ?? null,
+      location_source: result.data['location_source'] ?? null,
+    }
+  },
+
+  // Writes a plan from planLocationWrite. Profile rows are created lazily (see
+  // upsertProfile), so a brand-new user may not have one yet — create it then.
+  async saveLocation(userId: string, username: string, plan: LocationWritePlan): Promise<void> {
+    const payload = {
+      ...plan.detected,
+      ...(plan.profile ?? {}),
+      ['updated_at']: new Date().toISOString(),
+    }
+
+    const updated = await (supabase() as any)
+      .from('profiles')
+      .update(payload)
+      .eq('user_id', userId)
+      .select('user_id')
+
+    if (updated.error) {
+      throw new Error(`[Supabase:saveLocation] ${updated.error.message}`)
+    }
+    if ((updated.data?.length ?? 0) > 0) return
+
+    const created = await (supabase() as any)
+      .from('profiles')
+      .upsert({ ['user_id']: userId, ['username']: username, ...payload }, { onConflict: 'user_id' })
+
+    if (created.error) {
+      throw new Error(`[Supabase:saveLocation] ${created.error.message}`)
     }
   },
 }

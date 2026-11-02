@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { config } from '@/config'
+import { recordLocation } from '@/modules/geo/location.service'
+import type { GeoLocation } from '@/modules/geo/geo.types'
 import { userRepository } from '../repositories/user.repository'
 import { sessionRepository } from '../repositories/session.repository'
 import { resetTokenRepository } from '../repositories/reset-token.repository'
@@ -49,6 +51,7 @@ type TokenPair = {
 type AuthContext = {
   ipAddress: string | null
   userAgent: string | null
+  geo?: GeoLocation | null
 }
 
 // ─── Register ─────────────────────────────────────────────────────────────────
@@ -83,6 +86,7 @@ export async function register(input: {
   )
 
   auditRepository.log(buildAudit('AUTH_REGISTER', user['id'], input.ctx))
+  await recordLocation(user, input.ctx)
 
   return { user, tokens }
 }
@@ -147,6 +151,9 @@ export async function login(input: {
   const tokens = await issueTokenPair(user, input.ctx)
 
   auditRepository.log(buildAudit('AUTH_LOGIN', user['id'], input.ctx))
+
+  // Refresh the user's detected location without slowing the login down.
+  void recordLocation(user, input.ctx)
 
   return { user, tokens }
 }
@@ -456,6 +463,11 @@ export async function handleOAuthProfile(input: {
   auditRepository.log(
     buildAudit('AUTH_OAUTH_LOGIN', user['id'], input.ctx, { provider: profile.provider, isNew })
   )
+    
+  // New accounts wait briefly so the first response carries a country; returning
+  // users are refreshed in the background.
+  if (isNew) await recordLocation(user, input.ctx)
+  else void recordLocation(user, input.ctx)
 
   return { user, tokens, isNew }
 }

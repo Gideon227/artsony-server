@@ -70,6 +70,9 @@ export const RedisTTL = {
   convParticipants: 60 * 5,            // 5 min — participant array fallback cache
   userUnreadCount: 60 * 60 * 24,      // 24 hours — conversation unread counter cache
   userUnreadNotifs: 60 * 60 * 24,      // 24 hours — global notifications unread cache
+
+  // IP geolocation
+  geoIp: 60 * 60 * 24,                 // 24 hours — cached IP → country lookups
 } as const
 
 export type RedisTTLKey = keyof typeof RedisTTL
@@ -152,6 +155,10 @@ export const RedisKeys = {
   // ── Physical order pipeline ──────────────────────────────────────────────
   orderCancelLock: (physicalId: string) => `order:cancel:lock:${physicalId}`,
   physicalView: (physicalId: string) => `physical:view:${physicalId}`,
+
+  // ── IP geolocation ───────────────────────────────────────────────────────
+  // Keyed by a hash of the IP so raw addresses never appear in Redis key names.
+  geoIp: (ipHash: string) => `geo:ip:${ipHash}`,
 } as const
 
 // ── Generic typed helpers ─────────────────────────────────────────────────────

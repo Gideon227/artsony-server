@@ -11,6 +11,7 @@ import {
   handleGetUsersByIds,
   handleGetPublicProfile,
   handleSearchUsers,
+  handleSearchPublicUsers,
   onboardingValidation,
   updateProfileValidation,
   updatePrivacySettingsValidation,
@@ -34,6 +35,9 @@ router.get('/me', handleGetMe)
 // avatar/background image URLs, and social links
 router.patch('/me', updateProfileValidation, handleUpdateProfile)
 router.get('/search', requireAuth, handleSearchUsers)
+// GET /api/users/search/public?q= — public-safe search (username or display
+// name, excludes the caller). Used by pickers such as upload collaborators.
+router.get('/search/public', handleSearchPublicUsers)
 
 // GET /api/users/by-ids?ids=uuid1,uuid2 — batch public-profile lookup
 // (e.g. resolving artwork collaborator ids to display names/avatars)

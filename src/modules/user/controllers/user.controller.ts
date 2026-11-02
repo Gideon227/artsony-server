@@ -362,6 +362,40 @@ export async function handleSearchUsers(
   }
 }
 
+// ─── GET /api/users/search/public?q=name&limit=8 ──────────────────────────────
+// Public-safe user search for pickers (e.g. tagging collaborators on upload).
+// Unlike /search, this matches display names too, excludes the caller, and
+// only returns public profile fields (no email / account-security fields).
+export async function handleSearchPublicUsers(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ success: false, code: 'UNAUTHORIZED' })
+      return
+    }
+
+    const q = String(req.query['q'] ?? '').trim().slice(0, 50)
+    const requested = Number(req.query['limit'] ?? 8)
+    const limit = Math.min(Math.max(Number.isFinite(requested) ? requested : 8, 1), 20)
+
+    if (q.length < 2) {
+      res.json({ success: true, data: [] })
+      return
+    }
+
+    const { userRepository } = await import(
+      '@/modules/auth/repositories/user.repository.js'
+    )
+    const results = await userRepository.searchPublicProfiles(q, limit, req.auth.sub)
+    res.json({ success: true, data: results })
+  } catch (err) {
+    next(err)
+  }
+}
+
 // ─── GET /api/users/by-ids?ids=uuid1,uuid2 ────────────────────────────────────
 // Batch profile resolver — used by the frontend to resolve collaborator ids
 // (and similar id-only references) to display names/avatars in one round trip.

@@ -156,6 +156,15 @@ export async function updateProfile({ userId, input }: UpdateProfileInput): Prom
     if (input[key] !== undefined) profileFields[key] = input[key]
   }
 
+  // A manual location edit — including clearing it — makes the location the
+  // user's own: login-time auto-detection stops touching country/state/city.
+  // Compared against the stored value so a form that re-sends an unchanged
+  // location doesn't flip it.
+  const locationChanged = (['country', 'state', 'city'] as const).some(
+    (key) => input[key] !== undefined && (input[key] ?? null) !== (current[key] ?? null),
+  )
+  if (locationChanged) profileFields['location_source'] = 'user'
+
   // Upsert whenever a profile field changed, or the username changed (so
   // profiles.username — the denormalised public copy — stays in sync).
   if (Object.keys(profileFields).length > 0 || nextUsername !== current.username) {

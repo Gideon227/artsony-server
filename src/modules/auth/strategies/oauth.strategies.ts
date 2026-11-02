@@ -25,7 +25,7 @@ passport.use(
           providerId: profile.id,
           email,
           displayName: profile.displayName ?? email.split('@')[0] ?? 'Artist',
-          avatarUrl: profile.photos?.[0]?.value ?? null,
+          avatar_url: profile.photos?.[0]?.value ?? null,
         }
 
         return done(null, oauthProfile)
@@ -63,7 +63,7 @@ passport.use(
           providerId: profile.id,
           email,
           displayName,
-          avatarUrl:
+          avatar_url:
             (profile.photos?.[0]?.value) ?? null,
         }
 

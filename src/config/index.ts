@@ -121,6 +121,28 @@ export const config = {
     holdPeriodDays: parseInt(optional_env('WALLET_HOLD_PERIOD_DAYS', '3'), 10),
     minWithdrawalAmount: parseFloat(optional_env('WALLET_MIN_WITHDRAWAL_AMOUNT', '20')),
   },
+
+    // ── IP geolocation (sign-up / login) ──────────────────────────────────────
+  // Country is detected from the connecting IP and saved on the profile. None
+  // of this is required: with no provider configured, detection simply no-ops.
+  geo: {
+    enabled: optional_env('GEO_ENABLED', 'true') === 'true',
+    // IPinfo Lite token (free, country-level). https://ipinfo.io/lite
+    ipinfoToken: optional_env('IPINFO_TOKEN', ''),
+    // Cloudflare only — enable ONLY if the server is reachable exclusively through
+    // Cloudflare, otherwise clients could send these headers themselves.
+    trustCdnHeaders: optional_env('GEO_TRUST_CDN_HEADERS', 'false') === 'true',
+    trustCloudflareIp: optional_env('GEO_TRUST_CF_CONNECTING_IP', 'false') === 'true',
+    // Also auto-fill the public state/city (needs a source that provides them,
+    // e.g. Cloudflare's location headers). Off by default: they're shown
+    // publicly and IP-derived cities are the least reliable part of a lookup.
+    autofillRegion: optional_env('GEO_AUTOFILL_REGION', 'false') === 'true',
+    lookupTimeoutMs: parseInt(optional_env('GEO_LOOKUP_TIMEOUT_MS', '1500'), 10),
+    // Dev only: pretend requests come from this public IP (localhost can't be located).
+    devIp: isProduction ? '' : optional_env('GEO_DEV_IP', ''),
+    // Logs each lookup, including the IP — use briefly to verify proxy setup.
+    debug: optional_env('GEO_DEBUG', 'false') === 'true',
+  },
 } as const
 
 export type Config = typeof config
