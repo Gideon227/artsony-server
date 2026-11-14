@@ -376,10 +376,23 @@ export const orderRepository = {
 
   // ── UpdateStatus ───────────────────────────────────────────────────────────
 
-  async updateStatus(orderId: string, status: OrderStatus): Promise<Order> {
+  // `cancelledBy` is recorded together with the time whenever an order is closed
+  // (CANCELLED / REFUNDED) so My Orders can show who cancelled it and when.
+  async updateStatus(
+    orderId: string,
+    status: OrderStatus,
+    cancelledBy?: 'buyer' | 'artist' | 'admin' | 'system',
+  ): Promise<Order> {
+    const now = new Date().toISOString()
+    const patch: Record<string, unknown> = { status, updated_at: now }
+    if (status === 'CANCELLED' || status === 'REFUNDED') {
+      patch['cancelled_at'] = now
+      if (cancelledBy) patch['cancelled_by'] = cancelledBy
+    }
+
     const result = await (supabase() as any)
       .from('orders')
-      .update({ status, updated_at: new Date().toISOString() })
+      .update(patch)
       .eq('id', orderId)
       .select('*')
       .single()

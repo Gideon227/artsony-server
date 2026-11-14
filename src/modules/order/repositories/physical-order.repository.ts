@@ -14,6 +14,8 @@ import type {
   DeliveryStatus,
   RefundStatus,
   CourierServiceType,
+  OrderStatus,
+  TransactionStatus,
 } from '@/common/types/commerce.types'
 import type { Order, OrderItem } from '@/common/types/commerce.types'
 import { toOrderItem } from './order.repository'
@@ -115,6 +117,103 @@ function toPhysicalListEntry(row: any): OrderItemPhysicalListEntry {
     cancelled_at: null,
     buyer:  toPartySummary(order?.buyer),
     seller: toPartySummary(orderItem?.seller),
+    source:         'physical',
+    order_status:   null,
+    payment_status: null,
+  }
+}
+
+// ── Unfulfilled entries ──────────────────────────────────────────────────────
+// A physical order item that has no order_item_physical row yet (payment pending,
+// failed, expired, or cancelled before payment) is still a physical order. These
+// helpers build its list entry so the buyer sees it like any other physical order.
+
+type UnfulfilledOrderRow = {
+  id:           string
+  order_number: string | null
+  status:       OrderStatus
+  cancelled_by: OrderTimelineEvent['actor_role'] | null
+  cancelled_at: string | null
+  updated_at:   string
+}
+
+const UNFULFILLED_ORDER_COLUMNS = 'id, order_number, status, buyer_id, cancelled_by, cancelled_at, updated_at'
+
+const UNFULFILLED_ITEM_COLUMNS = `
+  id,
+  order_id,
+  artwork_id,
+  artwork_title,
+  artwork_slug,
+  artwork_thumbnail_url,
+  artwork_format,
+  unit_price,
+  quantity,
+  created_at,
+  seller:users!order_items_seller_id_fkey (
+    id,
+    profile:profiles ( username, display_name, avatar_url )
+  )
+`
+
+const PAID_ORDER_STATUSES: OrderStatus[] = ['PAYMENT_CONFIRMED', 'PROCESSING', 'SHIPPED', 'FULFILLED', 'COMPLETED']
+
+function toUnfulfilledEntry(
+  item: any,
+  order: UnfulfilledOrderRow,
+  paymentStatus: TransactionStatus | null,
+): OrderItemPhysicalListEntry {
+  const isDigital = item['artwork_format'] === 'DIGITAL'
+  const closed    = order.status === 'CANCELLED' || order.status === 'REFUNDED'
+  const delivery_status: DeliveryStatus =
+    closed                                                  ? 'CANCELLED' :
+    isDigital && PAID_ORDER_STATUSES.includes(order.status) ? 'DELIVERED' :
+    'LIVE'
+  const createdAt   = new Date(item['created_at'])
+  // When the order was closed, `cancelled_at` is that moment; older rows fall back to updated_at.
+  const cancelledAt = closed ? new Date(order.cancelled_at ?? order.updated_at) : null
+
+  return {
+    id:                      item['id'],
+    order_item_id:           item['id'],
+    order_id:                item['order_id'],
+    timeline_status:         'ORDER_RECEIVED',
+    delivery_status,
+    shipping_cost:           null,
+    courier_name:            null,
+    courier_service_type:    null,
+    tracking_id:             null,
+    estimated_delivery_date: null,
+    pickup_address:          null,
+    refund_status:           'NONE',
+    refund_amount:           null,
+    refund_initiated_at:     null,
+    refund_completed_at:     null,
+    refund_notes:            null,
+    confirmed_at:            null,
+    picked_up_at:            null,
+    in_transit_at:           null,
+    delivered_at:            null,
+    created_at:              createdAt,
+    updated_at:              cancelledAt ?? new Date(order.updated_at),
+    order_number:            order.order_number ?? null,
+    order_item: {
+      artwork_id:            item['artwork_id'] ?? '',
+      artwork_title:         item['artwork_title'] ?? 'Untitled artwork',
+      artwork_slug:          item['artwork_slug'] ?? '',
+      artwork_thumbnail_url: item['artwork_thumbnail_url'] ?? null,
+      artwork_format:        item['artwork_format'] ?? 'PHYSICAL',
+      unit_price:            item['unit_price'] != null ? Number(item['unit_price']) : 0,
+      quantity:              item['quantity'] ?? 1,
+      created_at:            createdAt,
+    },
+    cancelled_by:   closed ? (order.cancelled_by ?? null) : null,
+    cancelled_at:   cancelledAt,
+    buyer:          null,
+    seller:         toPartySummary(item['seller']),
+    source:         isDigital ? 'digital' : 'unfulfilled',
+    order_status:   order.status,
+    payment_status: paymentStatus,
   }
 }
 
@@ -1067,6 +1166,113 @@ export const physicalOrderRepository = {
       has_next:    page < total_pages,
       has_prev:    page > 1,
     }
+  },
+
+  // ── findBuyerItemsWithoutPhysicalRow ─────────────────────────────────────────
+  // order_item_physical rows only exist once payment is confirmed (and only for
+  // physical items), so a buyer's "My Orders" built from that table alone hides
+  // unpaid orders, expired/cancelled orders and every digital purchase. This
+  // returns those order items as list entries so the buyer can see them.
+  // Entries use the order_item id as `id` and carry source/order_status/
+  // payment_status so the UI can render them without a physical-order detail.
+
+  async findBuyerItemsWithoutPhysicalRow(buyerId: string): Promise<OrderItemPhysicalListEntry[]> {
+    const ordersResult = await (supabase() as any)
+      .from('orders')
+      .select(UNFULFILLED_ORDER_COLUMNS)
+      .eq('buyer_id', buyerId)
+
+    if (ordersResult.error) {
+      throw new Error(`[physical.findBuyerUnfulfilled.orders] ${ordersResult.error.message}`)
+    }
+
+    const orders: UnfulfilledOrderRow[] = ordersResult.data ?? []
+    if (!orders.length) return []
+    const orderById = new Map(orders.map(o => [o.id, o]))
+    const orderIds  = orders.map(o => o.id)
+
+    const itemsResult = await (supabase() as any)
+      .from('order_items')
+      .select(UNFULFILLED_ITEM_COLUMNS)
+      .in('order_id', orderIds)
+
+    if (itemsResult.error) {
+      throw new Error(`[physical.findBuyerUnfulfilled.items] ${itemsResult.error.message}`)
+    }
+
+    const items: any[] = itemsResult.data ?? []
+    if (!items.length) return []
+    const itemIds = items.map(i => i['id'] as string)
+
+    const [physicalResult, txResult] = await Promise.all([
+      (supabase() as any).from('order_item_physical').select('order_item_id').in('order_item_id', itemIds),
+      (supabase() as any)
+        .from('transactions')
+        .select('order_id, status, created_at')
+        .in('order_id', orderIds)
+        .order('created_at', { ascending: false }),
+    ])
+
+    if (physicalResult.error) {
+      throw new Error(`[physical.findBuyerUnfulfilled.physical] ${physicalResult.error.message}`)
+    }
+    if (txResult.error) {
+      throw new Error(`[physical.findBuyerUnfulfilled.transactions] ${txResult.error.message}`)
+    }
+
+    const hasPhysical = new Set<string>((physicalResult.data ?? []).map((r: any) => r['order_item_id'] as string))
+
+    // Newest transaction per order wins (rows arrive newest-first).
+    const paymentStatusByOrder = new Map<string, TransactionStatus>()
+    for (const tx of txResult.data ?? []) {
+      if (!paymentStatusByOrder.has(tx['order_id'])) paymentStatusByOrder.set(tx['order_id'], tx['status'] as TransactionStatus)
+    }
+
+    return items
+      .filter(item => !hasPhysical.has(item['id']))
+      .map(item => toUnfulfilledEntry(item, orderById.get(item['order_id'])!, paymentStatusByOrder.get(item['order_id']) ?? null))
+  },
+
+  // ── findUnfulfilledByOrderItemId ─────────────────────────────────────────────
+  // One physical order item that has no order_item_physical row yet, as a list
+  // entry plus the order's buyer id (for the access check). Returns null when the
+  // id is unknown, is a digital item, or already has a real physical row.
+
+  async findUnfulfilledByOrderItemId(
+    orderItemId: string,
+  ): Promise<{ entry: OrderItemPhysicalListEntry; buyer_id: string } | null> {
+    const itemResult = await (supabase() as any)
+      .from('order_items')
+      .select(UNFULFILLED_ITEM_COLUMNS)
+      .eq('id', orderItemId)
+      .limit(1)
+
+    if (itemResult.error) {
+      throw new Error(`[physical.findUnfulfilledByItem.item] ${itemResult.error.message}`)
+    }
+    const item = (itemResult.data ?? [])[0]
+    if (!item || item['artwork_format'] === 'DIGITAL') return null
+
+    const [orderResult, physicalResult, txResult] = await Promise.all([
+      (supabase() as any).from('orders').select(UNFULFILLED_ORDER_COLUMNS).eq('id', item['order_id']).limit(1),
+      (supabase() as any).from('order_item_physical').select('id').eq('order_item_id', orderItemId).limit(1),
+      (supabase() as any)
+        .from('transactions')
+        .select('status')
+        .eq('order_id', item['order_id'])
+        .order('created_at', { ascending: false })
+        .limit(1),
+    ])
+
+    for (const [name, result] of [['order', orderResult], ['physical', physicalResult], ['transactions', txResult]] as const) {
+      if (result.error) throw new Error(`[physical.findUnfulfilledByItem.${name}] ${result.error.message}`)
+    }
+
+    const order = (orderResult.data ?? [])[0] as (UnfulfilledOrderRow & { buyer_id: string }) | undefined
+    if (!order || (physicalResult.data ?? []).length > 0) return null
+
+    const paymentStatus = ((txResult.data ?? [])[0]?.['status'] ?? null) as TransactionStatus | null
+    return { entry: toUnfulfilledEntry(item, order, paymentStatus), buyer_id: order.buyer_id }
   },
 
   // ── getOrderItem ────────────────────────────────────────────────────────────

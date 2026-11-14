@@ -642,7 +642,7 @@ export const orderService = {
       await orderRepository.updateTransaction(tx.id, { status: 'EXPIRED' } as any)
     }
 
-    const updated = await orderRepository.updateStatus(orderId, 'CANCELLED')
+    const updated = await orderRepository.updateStatus(orderId, 'CANCELLED', 'buyer')
     invalidateOrderCache(orderId)
     return updated
   },
@@ -672,7 +672,8 @@ export const orderService = {
     }
 
     assertTransition(order.status, nextStatus)
-    const updated = await orderRepository.updateStatus(orderId, nextStatus)
+    // Only admins can reach CANCELLED / REFUNDED here (sellers may only ship).
+    const updated = await orderRepository.updateStatus(orderId, nextStatus, isAdmin ? 'admin' : undefined)
     invalidateOrderCache(orderId)
     return updated
   },
@@ -736,7 +737,7 @@ export const orderService = {
           }
         }
 
-        await orderRepository.updateStatus(tx.order_id, 'CANCELLED')
+        await orderRepository.updateStatus(tx.order_id, 'CANCELLED', 'system')
         invalidateOrderCache(tx.order_id)
       } catch {
         // Log and continue — one failure must not block others

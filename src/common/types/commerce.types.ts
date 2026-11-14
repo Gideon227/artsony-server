@@ -453,7 +453,18 @@ export type OrderItemPhysicalListEntry = OrderItemPhysical & {
   cancelled_at: Date | null
   buyer: OrderPartySummary | null
   seller: OrderPartySummary | null
+  // 'physical'    = a real order_item_physical row (the normal case).
+  // 'digital'     = a digital order item (digital items never get a physical row).
+  // 'unfulfilled' = a physical order item whose physical row doesn't exist yet
+  //                 (payment unconfirmed, expired/cancelled, or pipeline still starting).
+  // For 'digital' / 'unfulfilled' entries `id` is the order_item id, NOT a
+  // physical-order id, so it must not be sent to the physical detail endpoints.
+  source: OrderListSource
+  order_status: OrderStatus | null
+  payment_status: TransactionStatus | null
 }
+
+export type OrderListSource = 'physical' | 'digital' | 'unfulfilled'
 
 // ── Order Timeline Event ──────────────────────────────────────────────────────
 // Append-only. Never updated, never deleted.

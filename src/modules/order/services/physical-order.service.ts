@@ -22,6 +22,7 @@ import type {
   OrderInvoice,
   OrderReceipt,
   OrderItem,
+  OrderItemPhysicalListEntry,
   PhysicalOrderFilters,
   BuyerOrderView,
   ArtistOrderView,
@@ -968,9 +969,14 @@ export const physicalOrderService = {
     } | null
     buyer:  { id: string; username: string; avatar_url: string | null } | null
     seller: { id: string; username: string; avatar_url: string | null } | null
+    // true when no order_item_physical row exists yet (payment pending / failed / expired)
+    // and the view was built from the order item instead.
+    is_provisional:   boolean
   }> {
     const physical = await physicalOrderRepository.findById(physicalId)
-    if (!physical) throw new NotFoundError('Physical order item')
+    // A physical artwork is a physical order whatever its payment state: with no
+    // physical row yet, `physicalId` is the order item id and a provisional view is returned.
+    if (!physical) return this._getProvisionalView(physicalId, requesterId, requesterRole)
 
     const [buyerId, sellerId] = await Promise.all([
       getOrderBuyerIdDirect(physical.order_id),
@@ -1004,7 +1010,73 @@ export const physicalOrderService = {
       sellerId ? physicalOrderRepository.getUserProfile(sellerId) : Promise.resolve(null),
     ])
 
-    return { physical, timeline, delivery_proofs, invoice, receipt, refund_requests, order_item, order_number, delivery_address, buyer, seller }
+    return { physical, timeline, delivery_proofs, invoice, receipt, refund_requests, order_item, order_number, delivery_address, buyer, seller, is_provisional: false }
+  },
+
+  // ── _getProvisionalView ────────────────────────────────────────────────────
+  // Detail view for a physical order item that has no order_item_physical row yet.
+  // Same shape as getOrderView so the buyer gets the regular physical detail:
+  // nothing has shipped, so tracking, timeline, proofs, invoice and receipt are empty.
+
+  async _getProvisionalView(orderItemId: string, requesterId: string, requesterRole: string) {
+    const found = await physicalOrderRepository.findUnfulfilledByOrderItemId(orderItemId)
+    if (!found) throw new NotFoundError('Physical order item')
+    const { entry, buyer_id } = found
+
+    // Nothing has been fulfilled, so only the buyer (or an admin) may see it;
+    // the artist is not shown an order that has not been paid.
+    if (requesterRole !== 'ADMIN' && buyer_id !== requesterId) throw new ForbiddenError('Access denied')
+
+    const physical: OrderItemPhysical = {
+      id:                      entry.id,
+      order_item_id:           entry.order_item_id,
+      order_id:                entry.order_id,
+      timeline_status:         entry.timeline_status,
+      delivery_status:         entry.delivery_status,
+      shipping_cost:           entry.shipping_cost,
+      courier_name:            entry.courier_name,
+      courier_service_type:    entry.courier_service_type,
+      tracking_id:             entry.tracking_id,
+      estimated_delivery_date: entry.estimated_delivery_date,
+      pickup_address:          entry.pickup_address,
+      refund_status:           entry.refund_status,
+      refund_amount:           entry.refund_amount,
+      refund_initiated_at:     entry.refund_initiated_at,
+      refund_completed_at:     entry.refund_completed_at,
+      refund_notes:            entry.refund_notes,
+      confirmed_at:            entry.confirmed_at,
+      picked_up_at:            entry.picked_up_at,
+      in_transit_at:           entry.in_transit_at,
+      delivered_at:            entry.delivered_at,
+      created_at:              entry.created_at,
+      updated_at:              entry.updated_at,
+    }
+
+    const sellerId = await getOrderItemSellerIdDirect(orderItemId)
+    const [refund_requests, delivery_address, order_item, buyer, seller] = await Promise.all([
+      physicalOrderRepository.getRefundRequests(physical.order_id),
+      physicalOrderRepository.getShippingAddress(physical.order_id),
+      physicalOrderRepository.getOrderItem(orderItemId),
+      physicalOrderRepository.getUserProfile(buyer_id),
+      sellerId ? physicalOrderRepository.getUserProfile(sellerId) : Promise.resolve(null),
+    ])
+
+    if (!order_item) throw new NotFoundError('Order item')
+
+    return {
+      physical,
+      timeline:        [] as OrderTimelineEvent[],
+      delivery_proofs: [] as DeliveryProof[],
+      invoice:         null,
+      receipt:         null,
+      refund_requests,
+      order_item,
+      order_number:    entry.order_number,
+      delivery_address,
+      buyer,
+      seller,
+      is_provisional:  true,
+    }
   },
 
   // ── List helpers ───────────────────────────────────────────────────────────
@@ -1012,9 +1084,71 @@ export const physicalOrderService = {
   // underlying delivery_status/timeline_status filters server-side so the
   // frontend tabs don't need to know the raw enum semantics.
 
+  // My Orders must show every purchase, not only the ones with a physical row.
+  // order_item_physical rows only appear after payment confirms (and never for
+  // digital items), so unpaid / expired / digital order items are merged in
+  // here as lightweight entries. When there is nothing to merge this is the
+  // original DB-paginated query, unchanged.
+
   async listForBuyer(buyerId: string, view: BuyerOrderView, filters: PhysicalOrderFilters) {
     const resolved = this._resolveBuyerView(view, filters)
-    return physicalOrderRepository.findByBuyerWithItems(buyerId, resolved)
+
+    // Timeline filters only apply to real physical rows.
+    const physicalOnly = Boolean(resolved.timeline_status || resolved.timeline_status_in)
+    const unfulfilled  = physicalOnly ? [] : await physicalOrderRepository.findBuyerItemsWithoutPhysicalRow(buyerId)
+
+    const term     = resolved.search?.trim().toLowerCase()
+    const fromTime = resolved.date_from ? new Date(resolved.date_from).getTime() : null
+    const toTime   = resolved.date_to   ? new Date(resolved.date_to).getTime()   : null
+
+    const extras = unfulfilled.filter(entry => {
+      if (resolved.delivery_status && entry.delivery_status !== resolved.delivery_status) return false
+      if (term) {
+        const inTitle  = entry.order_item.artwork_title.toLowerCase().includes(term)
+        const inNumber = (entry.order_number ?? '').toLowerCase().includes(term)
+        if (!inTitle && !inNumber) return false
+      }
+      const created = entry.created_at.getTime()
+      if (fromTime !== null && created < fromTime) return false
+      if (toTime   !== null && created > toTime)   return false
+      return true
+    })
+
+    if (!extras.length) return physicalOrderRepository.findByBuyerWithItems(buyerId, resolved)
+
+    // Merge: load every matching physical row (a buyer's order history is small),
+    // combine with the extras, sort, then paginate in memory.
+    const merged: OrderItemPhysicalListEntry[] = [...extras]
+    for (let p = 1; p <= 200; p++) {
+      const res = await physicalOrderRepository.findByBuyerWithItems(buyerId, { ...resolved, page: p, limit: 50 })
+      merged.push(...res.data)
+      if (!res.has_next) break
+    }
+
+    const dir     = resolved.sort_order === 'asc' ? 1 : -1
+    const valueOf = (e: OrderItemPhysicalListEntry) =>
+      e.order_item.unit_price * e.order_item.quantity + (e.shipping_cost ?? 0)
+
+    merged.sort((a, b) => {
+      const byDate = (a.created_at.getTime() - b.created_at.getTime()) * dir
+      if (resolved.sort_by !== 'value') return byDate
+      return (valueOf(a) - valueOf(b)) * dir || b.created_at.getTime() - a.created_at.getTime()
+    })
+
+    const page        = Math.max(1, resolved.page ?? 1)
+    const limit       = Math.min(50, Math.max(1, resolved.limit ?? 20))
+    const total       = merged.length
+    const total_pages = Math.ceil(total / limit)
+
+    return {
+      data:     merged.slice((page - 1) * limit, page * limit),
+      total,
+      page,
+      limit,
+      total_pages,
+      has_next: page < total_pages,
+      has_prev: page > 1,
+    }
   },
 
   async listForArtist(sellerId: string, view: ArtistOrderView, filters: PhysicalOrderFilters) {
