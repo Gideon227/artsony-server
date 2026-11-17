@@ -7,6 +7,9 @@ import {
   handleUpdateProfile,
   handleGetPrivacySettings,
   handleUpdatePrivacySettings,
+  handleGetPrivateDetails,
+  handleUpdatePrivateDetails,
+  updatePrivateDetailsValidation,
   handleGetInteractionPermissions,
   handleGetUsersByIds,
   handleGetPublicProfile,
@@ -47,6 +50,11 @@ router.get('/by-ids', handleGetUsersByIds)
 
 router.get('/me/privacy', handleGetPrivacySettings)
 router.patch('/me/privacy', updatePrivacySettingsValidation, handleUpdatePrivacySettings)
+
+// ─── Private details (phone number + billing address) ───────────────────────
+// Registered before /:userId/permissions and /:id so "me" is never read as an id.
+router.get('/me/private-details', handleGetPrivateDetails)
+router.patch('/me/private-details', updatePrivateDetailsValidation, handleUpdatePrivateDetails)
 
 // GET /api/users/:userId/permissions — can the requesting user message/
 // comment on/purchase from :userId, given :userId's privacy settings

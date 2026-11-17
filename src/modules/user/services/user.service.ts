@@ -5,6 +5,7 @@ import { ValidationError, NotFoundError } from '@/common/errors'
 import type { User, UserWithProfile, PrivacySettings } from '@/common/types'
 import { conversationRepository } from '@/modules/messaging/repositories/conversation.repository'
 import { userReportRepository } from '../repositories/user-report.repository'
+import { privateDetailsRepository, type PrivateDetails } from '../repositories/private-details.repository'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -186,7 +187,24 @@ export async function updatePrivacySettings(
   userId: string,
   settings: Partial<PrivacySettings>,
 ): Promise<PrivacySettings> {
-  return userRepository.updatePrivacySettings(userId, settings)
+  const user = await userRepository.findById(userId)
+  if (!user) throw new NotFoundError('User')
+  return userRepository.updatePrivacySettings(userId, user.username, settings)
+}
+
+// ─── Private details (phone number + billing address) ───────────────────────
+// Kept off the profile on purpose — see private-details.repository.ts.
+
+export async function getPrivateDetails(userId: string): Promise<PrivateDetails> {
+  return privateDetailsRepository.get(userId)
+}
+
+export async function updatePrivateDetails(
+  userId: string,
+  changes: Partial<PrivateDetails>,
+): Promise<PrivateDetails> {
+  if (Object.keys(changes).length === 0) return privateDetailsRepository.get(userId)
+  return privateDetailsRepository.upsert(userId, changes)
 }
 
 // ─── Interaction permissions (viewer-facing) ───────────────────────────────

@@ -4,6 +4,8 @@ import { extractRequestContext } from '@/middleware/error.middleware'
 import { ValidationError } from '@/common/errors'
 import * as userService from '../services/user.service'
 import { sanitiseUser } from '@/common/utils/sanitise-user'
+import { PRIVATE_DETAIL_KEYS, type PrivateDetails } from '../repositories/private-details.repository'
+import type { PrivacySettings } from '@/common/types'
 
 // ─── Validation chain ─────────────────────────────────────────────────────────
 
@@ -193,8 +195,88 @@ export async function handleUpdatePrivacySettings(
       res.status(401).json({ success: false, code: 'UNAUTHORIZED' })
       return
     }
-    const settings = await userService.updatePrivacySettings(req.auth.sub, req.body)
+    // Whitelist the three known keys — the body used to be spread straight
+    // into the profiles UPDATE, so any other column name in the request
+    // (e.g. followers_count) would have been written too.
+    const { who_can_message, who_can_comment, who_can_purchase } = req.body as Partial<PrivacySettings>
+    const changes: Partial<PrivacySettings> = {
+      ...(who_can_message !== undefined && { who_can_message }),
+      ...(who_can_comment !== undefined && { who_can_comment }),
+      ...(who_can_purchase !== undefined && { who_can_purchase }),
+    }
+    const settings = await userService.updatePrivacySettings(req.auth.sub, changes)
     res.json({ success: true, data: settings })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// ─── Private details: phone number + billing address ─────────────────────────
+// GET/PATCH /api/users/me/private-details — only ever the caller's own row.
+
+export const updatePrivateDetailsValidation = [
+  // Stored as E.164 ("+2348012345678"). Empty string / null clears it.
+  body('phone_number')
+    .optional({ nullable: true, values: 'falsy' })
+    .trim()
+    .matches(/^\+[1-9]\d{6,14}$/)
+    .withMessage('Phone number must be in international format, e.g. +2348012345678'),
+  body('billing_address').optional({ nullable: true }).trim().isLength({ max: 300 })
+    .withMessage('Address must be at most 300 characters'),
+  body('billing_city').optional({ nullable: true }).trim().isLength({ max: 100 })
+    .withMessage('City must be at most 100 characters'),
+  body('billing_state').optional({ nullable: true }).trim().isLength({ max: 100 })
+    .withMessage('State must be at most 100 characters'),
+  body('billing_postal_code').optional({ nullable: true }).trim().isLength({ max: 20 })
+    .withMessage('Postal code must be at most 20 characters'),
+  body('billing_country_code')
+    .optional({ nullable: true, values: 'falsy' })
+    .isISO31661Alpha2()
+    .withMessage('Country must be a valid ISO 3166-1 alpha-2 code'),
+]
+
+export async function handleGetPrivateDetails(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ success: false, code: 'UNAUTHORIZED' })
+      return
+    }
+    const details = await userService.getPrivateDetails(req.auth.sub)
+    res.json({ success: true, data: details })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export async function handleUpdatePrivateDetails(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    assertValid(req)
+    if (!req.auth) {
+      res.status(401).json({ success: false, code: 'UNAUTHORIZED' })
+      return
+    }
+
+    // Only known keys, and only the ones actually sent — so saving the phone
+    // never blanks the billing address. '' and null both mean "clear".
+    const body = req.body as Record<string, unknown>
+    const changes: Partial<PrivateDetails> = {}
+    for (const key of PRIVATE_DETAIL_KEYS) {
+      const value = body[key]
+      if (value === undefined) continue
+      const text = typeof value === 'string' ? value.trim() : ''
+      changes[key] = text === '' ? null : key === 'billing_country_code' ? text.toUpperCase() : text
+    }
+
+    const details = await userService.updatePrivateDetails(req.auth.sub, changes)
+    res.json({ success: true, data: details })
   } catch (err) {
     next(err)
   }

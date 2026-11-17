@@ -537,8 +537,13 @@ export async function changePassword(input: {
     })
   }
 
+  // 422 with a field error rather than 401: the client treats any 401 as an
+  // expired access token and runs a silent refresh + retry first, which turns
+  // one wrong guess into two requests. This is a form error, not a session one.
   const valid = await verifyPassword(user['password_hash'], input.currentPassword)
-  if (!valid) throw new UnauthorizedError('Current password is incorrect')
+  if (!valid) {
+    throw new ValidationError('Validation failed', { currentPassword: 'Current password is incorrect' })
+  }
 
   validatePasswordComplexity(input.newPassword)
   const newHash = await hashPassword(input.newPassword)

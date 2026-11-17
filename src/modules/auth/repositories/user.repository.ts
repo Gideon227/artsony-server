@@ -461,21 +461,26 @@ export const userRepository = {
     }
   },
 
-  async updatePrivacySettings(userId: string, settings: Partial<PrivacySettings>): Promise<PrivacySettings> {
+  // Upsert, not update: a profiles row is created lazily (see upsertProfile),
+  // and a bare UPDATE against a missing row matches zero rows WITHOUT erroring —
+  // the user would see "Privacy settings updated" while nothing was stored.
+  // profiles.username is NOT NULL, so the caller passes the current one.
+  async updatePrivacySettings(
+    userId: string,
+    username: string,
+    settings: Partial<PrivacySettings>,
+  ): Promise<PrivacySettings> {
     const result = await (supabase() as any)
       .from('profiles')
-      .update({ ...settings, ['updated_at']: new Date().toISOString() })
-      .eq('user_id', userId)
+      .upsert(
+        { ['user_id']: userId, ['username']: username, ...settings, ['updated_at']: new Date().toISOString() },
+        { onConflict: 'user_id' },
+      )
 
     if (result.error) {
       throw new Error(`[Supabase:updatePrivacySettings] ${result.error.message}`)
     }
 
-    // Re-read rather than chaining .select().single() onto the update —
-    // if no profiles row exists yet (edge case for a brand-new user who
-    // hasn't touched their profile), the update matches zero rows without
-    // erroring, and getPrivacySettings' EVERYONE defaults handle that
-    // gracefully rather than this throwing on a missing row.
     return this.getPrivacySettings(userId)
   },
 
